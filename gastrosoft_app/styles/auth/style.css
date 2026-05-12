@@ -1,0 +1,124 @@
+QWidget#authPage {
+    background-color: #F8FAFC;
+    color: #1E293B;
+    font-family: "Segoe UI";
+}
+
+QFrame#heroPanel {
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 1, y2: 1,
+        stop: 0 #051125,
+        stop: 0.48 #1F686E,
+        stop: 1 #153851
+    );
+    border: none;
+    border-radius: 30px;
+}
+
+QFrame#authCard {
+    background-color: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 28px;
+}
+
+QLabel#heroTitle {
+    background: transparent;
+    color: #FFFFFF;
+    font-size: 30px;
+    font-weight: 700;
+}
+
+QLabel#heroText,
+QLabel#heroHint {
+    background: transparent;
+    color: rgba(255, 255, 255, 0.84);
+    font-size: 11pt;
+}
+
+QLabel#authTitle {
+    color: #1E293B;
+    font-size: 22px;
+    font-weight: 700;
+    background: transparent;
+}
+
+QLabel#authSubtitle,
+QLabel#formHint {
+    color: #64748B;
+    background: transparent;
+}
+
+QLabel#fieldLabel {
+    color: #1E293B;
+    font-weight: 600;
+    background: transparent;
+    padding-left: 2px;
+}
+
+QLineEdit,
+QComboBox {
+    background-color: #FFFFFF;
+    color: #1E293B;
+    border: 1px solid #CBD5E1;
+    border-radius: 14px;
+    padding: 11px 14px;
+    min-height: 20px;
+    selection-color: #1E293B;
+    selection-background-color: #D8F0F1;
+    placeholder-text-color: #94A3B8;
+}
+
+QLineEdit:focus,
+QComboBox:focus {
+    border: 1px solid #1F686E;
+}
+
+QPushButton {
+    border-radius: 14px;
+    padding: 11px 16px;
+    font-weight: 600;
+}
+
+QPushButton[variant="primary"] {
+    background-color: #1F686E;
+    color: #FFFFFF;
+    border: none;
+}
+
+QPushButton[variant="secondary"] {
+    background-color: #E2E8F0;
+    color: #1E293B;
+    border: none;
+}
+
+QPushButton[variant="ghost"] {
+    background-color: transparent;
+    color: #1F686E;
+    border: 1px solid #1F686E;
+}
+
+QLabel#statusPill {
+    border-radius: 16px;
+    padding: 8px 12px;
+    font-weight: 600;
+}
+
+QLabel#statusPill[tone="info"] {
+    color: #1F686E;
+    background-color: #D8F0F1;
+}
+
+QLabel#statusPill[tone="success"] {
+    color: #0F766E;
+    background-color: #CCFBF1;
+}
+
+QLabel#statusPill[tone="warning"] {
+    color: #B45309;
+    background-color: #FEF3C7;
+}
+
+QLabel#statusPill[tone="danger"] {
+    color: #991B1B;
+    background-color: #FEE2E2;
+}

@@ -1,0 +1,2 @@
+"""GastroSoft desktop application package."""
+
