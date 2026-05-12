@@ -1,0 +1,89 @@
+QWidget#reservationsPage {
+    background-color: #F8FAFC;
+    color: #1E293B;
+    font-family: "Segoe UI";
+}
+
+QFrame#sectionCard {
+    background-color: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 24px;
+}
+
+QLabel#sectionCardTitle {
+    font-size: 14pt;
+    font-weight: 700;
+    color: #1E293B;
+}
+
+QLabel#sectionCardSubtitle {
+    color: #64748B;
+}
+
+QLineEdit,
+QComboBox,
+QDateTimeEdit,
+QSpinBox,
+QTableWidget {
+    background-color: #FFFFFF;
+    color: #1E293B;
+    border: 1px solid #CBD5E1;
+    border-radius: 14px;
+    padding: 8px 10px;
+    selection-color: #1E293B;
+    selection-background-color: #D8F0F1;
+    placeholder-text-color: #94A3B8;
+}
+
+QTableWidget {
+    gridline-color: #E2E8F0;
+}
+
+QHeaderView::section {
+    background-color: #F1F5F9;
+    padding: 10px;
+    border: none;
+    border-bottom: 1px solid #E2E8F0;
+    font-weight: 700;
+}
+
+QPushButton {
+    border-radius: 14px;
+    padding: 10px 16px;
+    font-weight: 600;
+}
+
+QPushButton[variant="primary"] {
+    background-color: #1F686E;
+    color: #FFFFFF;
+    border: none;
+}
+
+QPushButton[variant="secondary"] {
+    background-color: #E2E8F0;
+    color: #1E293B;
+    border: none;
+}
+
+QPushButton[variant="danger"] {
+    background-color: #991B1B;
+    color: #FFFFFF;
+    border: none;
+}
+
+QPushButton#tableButton {
+    min-height: 70px;
+    border-radius: 18px;
+    border: none;
+    font-weight: 700;
+}
+
+QPushButton#tableButton[state="free"] {
+    background-color: #D8F0F1;
+    color: #1F686E;
+}
+
+QPushButton#tableButton[state="busy"] {
+    background-color: #FEE2E2;
+    color: #991B1B;
+}

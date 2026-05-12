@@ -1,0 +1,96 @@
+QWidget#shellRoot {
+    background-color: #F8FAFC;
+    color: #1E293B;
+    font-family: "Segoe UI";
+    font-size: 10.5pt;
+}
+
+QFrame#navPanel {
+    background-color: #051125;
+    border: none;
+    border-radius: 28px;
+}
+
+QLabel#brandLabel {
+    color: #FFFFFF;
+    font-size: 24px;
+    font-weight: 700;
+    background: transparent;
+}
+
+QLabel#brandSubLabel {
+    color: rgba(255, 255, 255, 0.74);
+    background: transparent;
+}
+
+QPushButton#navButton {
+    background-color: transparent;
+    color: rgba(255, 255, 255, 0.84);
+    border: none;
+    border-radius: 16px;
+    padding: 14px 18px;
+    text-align: left;
+    font-weight: 600;
+}
+
+QPushButton#navButton:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+QPushButton#navButton:checked {
+    background-color: rgba(31, 104, 110, 0.96);
+    color: #FFFFFF;
+}
+
+QFrame#headerCard {
+    background-color: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 24px;
+}
+
+QLabel#pageTitle {
+    font-size: 23px;
+    font-weight: 700;
+    color: #1E293B;
+}
+
+QLabel#pageSubtitle {
+    color: #64748B;
+}
+
+QFrame#userBadge {
+    background-color: #F8FAFC;
+    border: 1px solid #E2E8F0;
+    border-radius: 18px;
+}
+
+QLabel#userNameLabel {
+    font-weight: 700;
+    color: #1E293B;
+    background: transparent;
+}
+
+QLabel#userRoleLabel {
+    color: #64748B;
+    background: transparent;
+}
+
+QPushButton[variant="ghost"] {
+    background-color: transparent;
+    color: #1F686E;
+    border: 1px solid #1F686E;
+    border-radius: 14px;
+    padding: 10px 16px;
+    font-weight: 600;
+}
+
+QPushButton[variant="ghost"]:hover {
+    background-color: #E6F4F4;
+}
+
+QStatusBar {
+    background-color: #FFFFFF;
+    color: #1E293B;
+    border-top: 1px solid #E2E8F0;
+}
+
