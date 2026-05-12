@@ -94,11 +94,7 @@ class GastroSoftWindow(QMainWindow):
 
         nav_layout.addStretch(1)
 
-        footer = QLabel(
-            "Демо-аккаунты: director / chef / waiter / cashier\n"
-            "Пароль для входа: 1234\n\n"
-            f"{self.store.mysql_status}"
-        )
+        footer = QLabel(f"Источник данных:\n{self.store.mysql_status}")
         footer.setObjectName("brandSubLabel")
         footer.setWordWrap(True)
         nav_layout.addWidget(footer)

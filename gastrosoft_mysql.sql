@@ -637,3 +637,140 @@ INSERT INTO measurement_unit (code, name, description) VALUES
   ('ml', 'Milliliter', 'Volume in milliliters'),
   ('l', 'Liter', 'Volume in liters'),
   ('pcs', 'Piece', 'Countable unit');
+
+-- =========================================================
+-- Application seed data
+-- =========================================================
+
+INSERT INTO skill (name, description) VALUES
+  ('Аналитика', 'Работа с показателями и отчетами'),
+  ('Горячий цех', 'Приготовление горячих блюд'),
+  ('Гости VIP', 'Обслуживание важных гостей'),
+  ('Закрытие смены', 'Кассовая дисциплина и закрытие дня'),
+  ('Бронирования', 'Организация посадки гостей'),
+  ('Холодный цех', 'Приготовление холодных блюд'),
+  ('Гриль', 'Работа с гриль-станцией'),
+  ('Отчеты', 'Финансовые и складские отчеты');
+
+INSERT INTO employee (role_id, last_name, first_name, middle_name, phone, email, hire_date, is_active) VALUES
+  ((SELECT role_id FROM employee_role WHERE code = 'DIRECTOR'), 'Смирнова', 'Анна', NULL, '+7 900 100-10-01', 'director@gastrosoft.local', CURRENT_DATE(), 1),
+  ((SELECT role_id FROM employee_role WHERE code = 'CHEF'), 'Волков', 'Илья', NULL, '+7 900 100-10-02', 'chef@gastrosoft.local', CURRENT_DATE(), 1),
+  ((SELECT role_id FROM employee_role WHERE code = 'WAITER'), 'Белова', 'Мария', NULL, '+7 900 100-10-03', 'waiter@gastrosoft.local', CURRENT_DATE(), 1),
+  ((SELECT role_id FROM employee_role WHERE code = 'CASHIER'), 'Корнеев', 'Олег', NULL, '+7 900 100-10-04', 'cashier@gastrosoft.local', CURRENT_DATE(), 1),
+  ((SELECT role_id FROM employee_role WHERE code = 'HALL_MANAGER'), 'Орлова', 'Ксения', NULL, '+7 900 100-10-05', 'hall@gastrosoft.local', CURRENT_DATE(), 1),
+  ((SELECT role_id FROM employee_role WHERE code = 'COOK'), 'Громов', 'Павел', NULL, '+7 900 100-10-06', 'cook1@gastrosoft.local', CURRENT_DATE(), 1),
+  ((SELECT role_id FROM employee_role WHERE code = 'COOK'), 'Котов', 'Даниил', NULL, '+7 900 100-10-07', 'cook2@gastrosoft.local', CURRENT_DATE(), 1),
+  ((SELECT role_id FROM employee_role WHERE code = 'ACCOUNTANT'), 'Руднева', 'Светлана', NULL, '+7 900 100-10-08', 'accountant@gastrosoft.local', CURRENT_DATE(), 1);
+
+INSERT INTO employee_skill (employee_id, skill_id, skill_level) VALUES
+  ((SELECT employee_id FROM employee WHERE email = 'director@gastrosoft.local'), (SELECT skill_id FROM skill WHERE name = 'Аналитика'), 5),
+  ((SELECT employee_id FROM employee WHERE email = 'chef@gastrosoft.local'), (SELECT skill_id FROM skill WHERE name = 'Горячий цех'), 5),
+  ((SELECT employee_id FROM employee WHERE email = 'waiter@gastrosoft.local'), (SELECT skill_id FROM skill WHERE name = 'Гости VIP'), 4),
+  ((SELECT employee_id FROM employee WHERE email = 'cashier@gastrosoft.local'), (SELECT skill_id FROM skill WHERE name = 'Закрытие смены'), 4),
+  ((SELECT employee_id FROM employee WHERE email = 'hall@gastrosoft.local'), (SELECT skill_id FROM skill WHERE name = 'Бронирования'), 5),
+  ((SELECT employee_id FROM employee WHERE email = 'cook1@gastrosoft.local'), (SELECT skill_id FROM skill WHERE name = 'Холодный цех'), 4),
+  ((SELECT employee_id FROM employee WHERE email = 'cook2@gastrosoft.local'), (SELECT skill_id FROM skill WHERE name = 'Гриль'), 4),
+  ((SELECT employee_id FROM employee WHERE email = 'accountant@gastrosoft.local'), (SELECT skill_id FROM skill WHERE name = 'Отчеты'), 5);
+
+INSERT INTO app_user (employee_id, login, password_hash, is_active) VALUES
+  ((SELECT employee_id FROM employee WHERE email = 'director@gastrosoft.local'), 'director', '03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4', 1),
+  ((SELECT employee_id FROM employee WHERE email = 'chef@gastrosoft.local'), 'chef', '03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4', 1),
+  ((SELECT employee_id FROM employee WHERE email = 'waiter@gastrosoft.local'), 'waiter', '03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4', 1),
+  ((SELECT employee_id FROM employee WHERE email = 'cashier@gastrosoft.local'), 'cashier', '03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4', 1);
+
+INSERT INTO restaurant_table (code, seats_count, is_active, note) VALUES
+  ('T-01', 2, 1, 'Window table'),
+  ('T-02', 2, 1, 'Bar area'),
+  ('T-03', 4, 1, 'Main hall'),
+  ('T-04', 4, 1, 'Main hall'),
+  ('T-05', 6, 1, 'Family table'),
+  ('T-06', 6, 1, 'VIP corner');
+
+INSERT INTO guest (full_name, phone) VALUES
+  ('Екатерина Миронова', '+7 912 555-11-22'),
+  ('Денис Петров', '+7 922 100-50-40');
+
+INSERT INTO reservation (
+  guest_id,
+  table_id,
+  reservation_status_id,
+  reserved_from,
+  reserved_to,
+  guest_count,
+  created_by_user_id
+) VALUES
+  (
+    (SELECT guest_id FROM guest WHERE phone = '+7 912 555-11-22'),
+    (SELECT table_id FROM restaurant_table WHERE code = 'T-06'),
+    (SELECT reservation_status_id FROM reservation_status WHERE code = 'ACTIVE'),
+    DATE_ADD(NOW(), INTERVAL 1 HOUR),
+    DATE_ADD(NOW(), INTERVAL 3 HOUR),
+    5,
+    (SELECT user_id FROM app_user WHERE login = 'director')
+  ),
+  (
+    (SELECT guest_id FROM guest WHERE phone = '+7 922 100-50-40'),
+    (SELECT table_id FROM restaurant_table WHERE code = 'T-02'),
+    (SELECT reservation_status_id FROM reservation_status WHERE code = 'ACTIVE'),
+    DATE_ADD(NOW(), INTERVAL 2 HOUR),
+    DATE_ADD(NOW(), INTERVAL 4 HOUR),
+    2,
+    (SELECT user_id FROM app_user WHERE login = 'director')
+  );
+
+INSERT INTO menu_category (name, description, sort_order) VALUES
+  ('Закуски', 'Small plates and starters', 10),
+  ('Супы', 'Soups', 20),
+  ('Горячее', 'Main dishes', 30),
+  ('Напитки', 'Drinks', 40);
+
+INSERT INTO dish (category_id, name, description, base_price, prep_time_minutes, is_active) VALUES
+  ((SELECT category_id FROM menu_category WHERE name = 'Закуски'), 'Брускетта с томатами', 'Хрустящий хлеб с томатами и базиликом', 390.00, 7, 1),
+  ((SELECT category_id FROM menu_category WHERE name = 'Закуски'), 'Тар-тар из лосося', 'Лосось с соусом и зеленью', 540.00, 10, 1),
+  ((SELECT category_id FROM menu_category WHERE name = 'Супы'), 'Том Ям', 'Острый суп с морепродуктами', 620.00, 12, 1),
+  ((SELECT category_id FROM menu_category WHERE name = 'Супы'), 'Крем-суп из грибов', 'Грибной крем-суп со сливками', 430.00, 9, 1),
+  ((SELECT category_id FROM menu_category WHERE name = 'Горячее'), 'Паста Альфредо', 'Паста со сливочным соусом', 590.00, 15, 1),
+  ((SELECT category_id FROM menu_category WHERE name = 'Горячее'), 'Бургер GastroSoft', 'Фирменный бургер с котлетой', 670.00, 14, 1),
+  ((SELECT category_id FROM menu_category WHERE name = 'Напитки'), 'Лимонад базилик-лайм', 'Домашний лимонад', 260.00, 3, 1),
+  ((SELECT category_id FROM menu_category WHERE name = 'Напитки'), 'Эспрессо', 'Классический кофе', 170.00, 2, 1);
+
+INSERT INTO ingredient (measurement_unit_id, name, cost_per_unit, critical_level, is_active) VALUES
+  ((SELECT measurement_unit_id FROM measurement_unit WHERE code = 'kg'), 'Томаты', 180.00, 5.000, 1),
+  ((SELECT measurement_unit_id FROM measurement_unit WHERE code = 'l'), 'Сливки', 220.00, 3.000, 1),
+  ((SELECT measurement_unit_id FROM measurement_unit WHERE code = 'kg'), 'Лосось', 1300.00, 2.500, 1),
+  ((SELECT measurement_unit_id FROM measurement_unit WHERE code = 'pcs'), 'Булочки бриошь', 45.00, 10.000, 1),
+  ((SELECT measurement_unit_id FROM measurement_unit WHERE code = 'kg'), 'Кофе зерно', 900.00, 1.500, 1);
+
+INSERT INTO inventory_operation (ingredient_id, stock_operation_type_id, quantity, performed_by_user_id, note) VALUES
+  ((SELECT ingredient_id FROM ingredient WHERE name = 'Томаты'), (SELECT stock_operation_type_id FROM stock_operation_type WHERE code = 'RECEIPT'), 4.600, (SELECT user_id FROM app_user WHERE login = 'director'), 'Начальный остаток'),
+  ((SELECT ingredient_id FROM ingredient WHERE name = 'Сливки'), (SELECT stock_operation_type_id FROM stock_operation_type WHERE code = 'RECEIPT'), 7.500, (SELECT user_id FROM app_user WHERE login = 'director'), 'Начальный остаток'),
+  ((SELECT ingredient_id FROM ingredient WHERE name = 'Лосось'), (SELECT stock_operation_type_id FROM stock_operation_type WHERE code = 'RECEIPT'), 3.100, (SELECT user_id FROM app_user WHERE login = 'director'), 'Начальный остаток'),
+  ((SELECT ingredient_id FROM ingredient WHERE name = 'Булочки бриошь'), (SELECT stock_operation_type_id FROM stock_operation_type WHERE code = 'RECEIPT'), 14.000, (SELECT user_id FROM app_user WHERE login = 'director'), 'Начальный остаток'),
+  ((SELECT ingredient_id FROM ingredient WHERE name = 'Кофе зерно'), (SELECT stock_operation_type_id FROM stock_operation_type WHERE code = 'RECEIPT'), 2.200, (SELECT user_id FROM app_user WHERE login = 'director'), 'Начальный остаток');
+
+INSERT INTO work_shift (shift_type_id, shift_status_id, planned_start, planned_end, created_by_user_id) VALUES
+  ((SELECT shift_type_id FROM shift_type WHERE code = 'MORNING'), (SELECT shift_status_id FROM shift_status WHERE code = 'IN_PROGRESS'), TIMESTAMP(CURRENT_DATE(), '08:00:00'), TIMESTAMP(CURRENT_DATE(), '14:00:00'), (SELECT user_id FROM app_user WHERE login = 'director')),
+  ((SELECT shift_type_id FROM shift_type WHERE code = 'DAY'), (SELECT shift_status_id FROM shift_status WHERE code = 'PLANNED'), TIMESTAMP(CURRENT_DATE(), '12:00:00'), TIMESTAMP(CURRENT_DATE(), '18:00:00'), (SELECT user_id FROM app_user WHERE login = 'director'));
+
+INSERT INTO shift_assignment (shift_id, employee_id, assignment_role_id, check_in_time) VALUES
+  (
+    (SELECT shift_id FROM work_shift WHERE planned_start = TIMESTAMP(CURRENT_DATE(), '08:00:00') LIMIT 1),
+    (SELECT employee_id FROM employee WHERE email = 'chef@gastrosoft.local'),
+    (SELECT role_id FROM employee_role WHERE code = 'CHEF'),
+    TIMESTAMP(CURRENT_DATE(), '08:00:00')
+  ),
+  (
+    (SELECT shift_id FROM work_shift WHERE planned_start = TIMESTAMP(CURRENT_DATE(), '12:00:00') LIMIT 1),
+    (SELECT employee_id FROM employee WHERE email = 'waiter@gastrosoft.local'),
+    (SELECT role_id FROM employee_role WHERE code = 'WAITER'),
+    NULL
+  );
+
+INSERT INTO customer_order (table_id, order_status_id, created_by_user_id, payment_method_id, created_at, closed_at) VALUES
+  ((SELECT table_id FROM restaurant_table WHERE code = 'T-03'), (SELECT order_status_id FROM order_status WHERE code = 'PREPARING'), (SELECT user_id FROM app_user WHERE login = 'waiter'), (SELECT payment_method_id FROM payment_method WHERE code = 'CARD'), DATE_SUB(NOW(), INTERVAL 20 MINUTE), NULL),
+  ((SELECT table_id FROM restaurant_table WHERE code = 'T-02'), (SELECT order_status_id FROM order_status WHERE code = 'CLOSED'), (SELECT user_id FROM app_user WHERE login = 'cashier'), (SELECT payment_method_id FROM payment_method WHERE code = 'CASH'), DATE_SUB(NOW(), INTERVAL 2 HOUR), DATE_SUB(NOW(), INTERVAL 1 HOUR));
+
+INSERT INTO order_item (order_id, dish_id, order_item_status_id, quantity, unit_price) VALUES
+  ((SELECT order_id FROM customer_order WHERE table_id = (SELECT table_id FROM restaurant_table WHERE code = 'T-03') ORDER BY order_id DESC LIMIT 1), (SELECT dish_id FROM dish WHERE name = 'Том Ям'), (SELECT order_item_status_id FROM order_item_status WHERE code = 'COOKING'), 1, 620.00),
+  ((SELECT order_id FROM customer_order WHERE table_id = (SELECT table_id FROM restaurant_table WHERE code = 'T-03') ORDER BY order_id DESC LIMIT 1), (SELECT dish_id FROM dish WHERE name = 'Лимонад базилик-лайм'), (SELECT order_item_status_id FROM order_item_status WHERE code = 'COOKING'), 1, 260.00),
+  ((SELECT order_id FROM customer_order WHERE table_id = (SELECT table_id FROM restaurant_table WHERE code = 'T-02') ORDER BY order_id DESC LIMIT 1), (SELECT dish_id FROM dish WHERE name = 'Паста Альфредо'), (SELECT order_item_status_id FROM order_item_status WHERE code = 'SERVED'), 2, 590.00);

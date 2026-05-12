@@ -1,7 +1,6 @@
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QFrame,
-    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -60,7 +59,7 @@ class AuthPage(QWidget):
 
         hero_layout.addStretch(1)
 
-        demo_hint = QLabel("Демо-вход:\n`director / 1234`\n`chef / 1234`\n`waiter / 1234`\n`cashier / 1234`")
+        demo_hint = QLabel("Пользователи и роли загружаются из MySQL. Если вход не работает, проверь mysql_config.json и примененную схему.")
         demo_hint.setObjectName("heroHint")
         demo_hint.setTextFormat(Qt.TextFormat.PlainText)
         hero_layout.addWidget(demo_hint)
@@ -121,24 +120,7 @@ class AuthPage(QWidget):
         login_button.clicked.connect(self.handle_login)
         layout.addWidget(login_button)
 
-        demo_grid = QGridLayout()
-        demo_grid.setHorizontalSpacing(10)
-        demo_grid.setVerticalSpacing(10)
-        for index, (title, login) in enumerate(
-            [
-                ("Директор", "director"),
-                ("Шеф-повар", "chef"),
-                ("Официант", "waiter"),
-                ("Кассир", "cashier"),
-            ]
-        ):
-            button = QPushButton(title)
-            apply_button_variant(button, "ghost")
-            button.clicked.connect(lambda checked=False, value=login: self.fill_demo(value))
-            demo_grid.addWidget(button, index // 2, index % 2)
-        layout.addLayout(demo_grid)
-
-        self.auth_feedback = QLabel("Введи данные вручную или используй демо-кнопки.")
+        self.auth_feedback = QLabel("Введи логин и пароль пользователя из базы данных.")
         self.auth_feedback.setObjectName("formHint")
         self.auth_feedback.setWordWrap(True)
         layout.addWidget(self.auth_feedback)
@@ -201,11 +183,6 @@ class AuthPage(QWidget):
         self.mode_stack.setCurrentIndex(index)
         apply_button_variant(self.login_mode_button, "primary" if index == 0 else "secondary")
         apply_button_variant(self.register_mode_button, "primary" if index == 1 else "secondary")
-
-    def fill_demo(self, login: str) -> None:
-        self.login_field.setText(login)
-        self.password_field.setText("1234")
-        self.auth_feedback.setText(f"Заполнен демо-аккаунт: {login}.")
 
     def handle_login(self) -> None:
         login = self.login_field.text().strip()
