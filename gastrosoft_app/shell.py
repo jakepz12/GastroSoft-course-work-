@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
@@ -21,6 +22,7 @@ from .pages.inventory_page import InventoryPage
 from .pages.orders_page import OrdersPage
 from .pages.reservations_page import ReservationsPage
 from .pages.staff_page import StaffPage
+from .role_access import allowed_pages_for_role, default_page_for_role, page_meta_for_role
 from .style_utils import load_style
 from .widgets import apply_button_variant
 
@@ -31,7 +33,15 @@ class GastroSoftWindow(QMainWindow):
         self.project_root = Path(__file__).resolve().parent.parent
         self.store = MySQLBackedStore(self.project_root)
         self.page_widgets: dict[str, QWidget] = {}
+        self.page_containers: dict[str, QScrollArea] = {}
         self.nav_buttons: dict[str, QPushButton] = {}
+        self.nav_titles = {
+            "dashboard": "Главная панель",
+            "staff": "Смены и персонал",
+            "reservations": "Бронирования",
+            "orders": "Заказы и кухня",
+            "inventory": "Склад и отчеты",
+        }
 
         self.page_meta = {
             "auth": ("Авторизация", "Вход в систему и создание учетной записи"),
@@ -77,13 +87,7 @@ class GastroSoftWindow(QMainWindow):
         nav_layout.addSpacing(8)
         self.nav_group = QButtonGroup(self)
         self.nav_group.setExclusive(True)
-        for page_key, button_title in [
-            ("dashboard", "Главная панель"),
-            ("staff", "Смены и персонал"),
-            ("reservations", "Бронирования"),
-            ("orders", "Заказы и кухня"),
-            ("inventory", "Склад и отчеты"),
-        ]:
+        for page_key, button_title in self.nav_titles.items():
             button = QPushButton(button_title)
             button.setObjectName("navButton")
             button.setCheckable(True)
@@ -94,11 +98,7 @@ class GastroSoftWindow(QMainWindow):
 
         nav_layout.addStretch(1)
 
-        footer = QLabel(
-            "Демо-аккаунты: director / chef / waiter / cashier\n"
-            "Пароль для входа: 1234\n\n"
-            f"{self.store.mysql_status}"
-        )
+        footer = QLabel(f"Источник данных:\n{self.store.mysql_status}")
         footer.setObjectName("brandSubLabel")
         footer.setWordWrap(True)
         nav_layout.addWidget(footer)
@@ -174,28 +174,54 @@ class GastroSoftWindow(QMainWindow):
             "inventory": inventory_page,
         }
 
-        for page in self.page_widgets.values():
-            self.stack.addWidget(page)
+        for page_key, page in self.page_widgets.items():
+            page_container = self._wrap_page(page)
+            self.page_containers[page_key] = page_container
+            self.stack.addWidget(page_container)
+
+    def _wrap_page(self, page: QWidget) -> QScrollArea:
+        page.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+        scroll_area = QScrollArea()
+        scroll_area.setObjectName("pageScrollArea")
+        scroll_area.viewport().setObjectName("pageScrollViewport")
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        scroll_area.setWidget(page)
+        return scroll_area
 
     def on_authenticated(self, user: dict) -> None:
         self.store.current_user = user
         self.user_name.setText(user["full_name"])
         self.user_role.setText(user["role"])
         self.show_status(f"Выполнен вход: {user['full_name']} ({user['role']})")
-        self.navigate("dashboard")
+        self._apply_role_navigation()
+        self.navigate(default_page_for_role(user["role"]))
 
     def logout(self) -> None:
         self.store.current_user = None
         self.user_name.setText("Не авторизован")
         self.user_role.setText("Гость")
+        self._apply_role_navigation()
         self.navigate("auth")
         self.show_status("Сеанс завершен.")
 
     def navigate(self, page_key: str) -> None:
+        if page_key != "auth":
+            allowed_pages = self._allowed_pages()
+            if not allowed_pages:
+                page_key = "auth"
+            elif page_key not in allowed_pages:
+                page_key = default_page_for_role(self._current_role())
+
         widget = self.page_widgets[page_key]
-        self.stack.setCurrentWidget(widget)
+        self.stack.setCurrentWidget(self.page_containers[page_key])
 
         title, subtitle = self.page_meta[page_key]
+        title, subtitle = page_meta_for_role(self._current_role(), page_key, (title, subtitle))
         self.page_title.setText(title)
         self.page_subtitle.setText(subtitle)
 
@@ -209,6 +235,20 @@ class GastroSoftWindow(QMainWindow):
 
         if hasattr(widget, "refresh_page"):
             widget.refresh_page()
+
+    def _current_role(self) -> str | None:
+        user = self.store.current_user or {}
+        return user.get("role")
+
+    def _allowed_pages(self) -> list[str]:
+        return allowed_pages_for_role(self._current_role())
+
+    def _apply_role_navigation(self) -> None:
+        allowed_pages = set(self._allowed_pages())
+        for key, button in self.nav_buttons.items():
+            button.setVisible(key in allowed_pages)
+            title, _ = page_meta_for_role(self._current_role(), key, (self.nav_titles[key], ""))
+            button.setText(title)
 
     def show_status(self, message: str) -> None:
         self.statusBar().showMessage(message, 4500)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -26,9 +26,9 @@ ROLE_CODE_TO_RU = {
 RU_ROLE_TO_CODE = {value: key for key, value in ROLE_CODE_TO_RU.items()}
 
 RESERVATION_STATUS_TO_CODE = {
-    "Ожидается": "ACTIVE",
-    "Подтверждена": "ACTIVE",
-    "Гость в зале": "ACTIVE",
+    "Ожидается": "PENDING",
+    "Подтверждена": "CONFIRMED",
+    "Гость в зале": "SEATED",
     "Завершена": "COMPLETED",
     "Отменена": "CANCELLED",
     "Не пришел": "NO_SHOW",
@@ -54,6 +54,21 @@ STOCK_OPERATION_TO_CODE = {
     "Корректировка": "ADJUSTMENT_IN",
 }
 
+SHIFT_TO_CODE = {
+    "Утро 08:00-14:00": "MORNING",
+    "День 12:00-18:00": "DAY",
+    "Вечер 17:00-23:00": "EVENING",
+}
+
+SHIFT_STATUS_TO_RU = {
+    "PLANNED": "План",
+    "IN_PROGRESS": "Подтверждена",
+    "COMPLETED": "Закрыта",
+    "CANCELLED": "Отменена",
+}
+
+ORDER_STATUS_SEQUENCE = ["ACCEPTED", "PREPARING", "READY", "SERVED"]
+
 
 class MySQLBackedStore(DemoStore):
     def __init__(self, project_root: Path) -> None:
@@ -61,6 +76,7 @@ class MySQLBackedStore(DemoStore):
         self.project_root = project_root
         self.mysql_enabled = False
         self.mysql_status = "MySQL: демо-режим, файл mysql_config.json не найден."
+        self.last_error = ""
         self.manager: MySQLConnectionManager | None = None
 
         config_path = project_root / DEFAULT_CONFIG_PATH.name
@@ -73,6 +89,7 @@ class MySQLBackedStore(DemoStore):
             self.mysql_status = message
             if ok:
                 self.mysql_enabled = True
+                self._ensure_reservation_statuses()
                 self.reload_from_mysql()
         except Exception as exc:
             self.mysql_enabled = False
@@ -89,24 +106,55 @@ class MySQLBackedStore(DemoStore):
         self._load_reservations()
         self._load_menu()
         self._load_inventory()
+        self._load_operations()
         self._load_kitchen_queue()
+        self._load_assignments()
+        self._load_dashboard_data()
         self.recalculate_tables()
 
     def authenticate(self, login: str, password: str) -> dict | None:
+        if not self.mysql_enabled:
+            self.last_error = "MySQL не подключен. Вход по тестовым данным отключен."
+            return None
+
+        user = self._authenticate_mysql(login, password)
+        if user is not None:
+            self.current_user = user
+            return user
+        return None
+
+    def refresh_dashboard(self) -> None:
         if self.mysql_enabled:
-            user = self._authenticate_mysql(login, password)
-            if user is not None:
-                self.current_user = user
-                return user
+            self.reload_from_mysql()
 
-            if self._login_exists_in_mysql(login):
-                return None
+    def metrics(self) -> dict:
+        if not self.mysql_enabled:
+            return super().metrics()
 
-        return super().authenticate(login, password)
+        row = self._fetch_one(
+            """
+            SELECT
+                COALESCE(SUM(CASE WHEN os.code IN ('SERVED', 'CLOSED') THEN total.total_amount ELSE 0 END), 0) AS revenue,
+                COUNT(co.order_id) AS orders_count
+            FROM customer_order co
+            JOIN order_status os ON os.order_status_id = co.order_status_id
+            LEFT JOIN v_order_total total ON total.order_id = co.order_id
+            WHERE DATE(co.created_at) = CURRENT_DATE()
+            """
+        )
+        active_reservations = [item for item in self.reservations if item["status"] != "Отменена"]
+        draft_total = self.get_draft_total()
+        return {
+            "revenue": f"{int(row['revenue'] or 0):,} ₽".replace(",", " "),
+            "orders": str(int(row["orders_count"] or 0)),
+            "reservations": str(len(active_reservations)),
+            "low_stock": str(len(self.low_stock_items())),
+            "draft_total": f"{draft_total:,} ₽".replace(",", " "),
+        }
 
     def register_user(self, full_name: str, login: str, password: str, role: str) -> tuple[bool, str, dict | None]:
         if not self.mysql_enabled:
-            return super().register_user(full_name, login, password, role)
+            return False, "MySQL не подключен. Пользователь не сохранен.", None
 
         try:
             if self._login_exists_in_mysql(login):
@@ -151,17 +199,158 @@ class MySQLBackedStore(DemoStore):
         except Error as exc:
             return False, f"Ошибка записи пользователя в MySQL: {exc}", None
 
-    def add_reservation(
-        self, guest: str, phone: str, table: str, date_time: datetime, guests: int, status: str
-    ) -> dict:
-        reservation = super().add_reservation(guest, phone, table, date_time, guests, status)
+    def add_assignment(self, employee_name: str, shift: str, date_text: str) -> dict | None:
         if not self.mysql_enabled:
-            return reservation
+            self.last_error = "MySQL не подключен. Смена не сохранена."
+            return None
 
         try:
             user_id = self._current_mysql_user_id()
             if user_id is None:
-                return reservation
+                self.last_error = "Нужно войти пользователем из MySQL, чтобы назначить смену."
+                return None
+
+            employee = self._get_employee_by_full_name(employee_name)
+            if employee is None:
+                self.last_error = f"Сотрудник не найден в MySQL: {employee_name}"
+                return None
+
+            shift_code = SHIFT_TO_CODE.get(shift, "DAY")
+            shift_type = self._fetch_one(
+                """
+                SELECT shift_type_id, default_start_time, default_end_time
+                FROM shift_type
+                WHERE code = %s
+                LIMIT 1
+                """,
+                (shift_code,),
+            )
+            if shift_type is None:
+                self.last_error = f"Тип смены не найден в MySQL: {shift}"
+                return None
+
+            shift_date = datetime.strptime(date_text, "%d.%m.%Y").date()
+            start_time = _as_time(shift_type["default_start_time"])
+            end_time = _as_time(shift_type["default_end_time"])
+            planned_start = datetime.combine(shift_date, start_time)
+            planned_end = datetime.combine(shift_date, end_time)
+            if planned_end <= planned_start:
+                planned_end += timedelta(days=1)
+
+            planned_status_id = self._get_id("shift_status", "shift_status_id", "code", "PLANNED")
+
+            with self._connect() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        INSERT INTO work_shift (
+                            shift_type_id,
+                            shift_status_id,
+                            planned_start,
+                            planned_end,
+                            created_by_user_id
+                        )
+                        VALUES (%s, %s, %s, %s, %s)
+                        """,
+                        (shift_type["shift_type_id"], planned_status_id, planned_start, planned_end, user_id),
+                    )
+                    shift_id = cursor.lastrowid
+                    cursor.execute(
+                        """
+                        INSERT INTO shift_assignment (shift_id, employee_id, assignment_role_id)
+                        VALUES (%s, %s, %s)
+                        """,
+                        (shift_id, employee["employee_id"], employee["role_id"]),
+                    )
+                    assignment_id = cursor.lastrowid
+                connection.commit()
+
+            self.reload_from_mysql()
+            return next((item for item in self.assignments if item.get("assignment_id") == assignment_id), None)
+        except (Error, ValueError) as exc:
+            self.last_error = f"Ошибка записи смены в MySQL: {exc}"
+            return None
+
+    def swap_assignment(self, assignment_index: int) -> str:
+        if not self.mysql_enabled or assignment_index < 0 or assignment_index >= len(self.assignments):
+            return "MySQL не подключен или назначение не выбрано."
+
+        assignment = self.assignments[assignment_index]
+        try:
+            replacement = self._fetch_one(
+                """
+                SELECT e.employee_id
+                FROM employee e
+                JOIN employee_role er ON er.role_id = e.role_id
+                WHERE er.code = %s
+                  AND e.employee_id <> %s
+                  AND e.is_active = 1
+                ORDER BY e.employee_id
+                LIMIT 1
+                """,
+                (RU_ROLE_TO_CODE.get(assignment["role"], assignment["role"]), assignment["employee_id"]),
+            )
+            if replacement is None:
+                return "Подходящей замены для выбранной роли не найдено."
+
+            with self._connect() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        "UPDATE shift_assignment SET employee_id = %s WHERE assignment_id = %s",
+                        (replacement["employee_id"], assignment["assignment_id"]),
+                    )
+                connection.commit()
+            self.reload_from_mysql()
+        except Error as exc:
+            return f"Ошибка подбора замены в MySQL: {exc}"
+
+        updated = next(
+            (item for item in self.assignments if item.get("assignment_id") == assignment["assignment_id"]),
+            None,
+        )
+        if updated is None:
+            return "Замена сохранена в MySQL."
+        return f"Назначена замена: {updated['employee']}."
+
+    def close_assignment(self, assignment_index: int) -> str:
+        if not self.mysql_enabled or assignment_index < 0 or assignment_index >= len(self.assignments):
+            return "MySQL не подключен или смена не выбрана."
+
+        assignment = self.assignments[assignment_index]
+        try:
+            completed_status_id = self._get_id("shift_status", "shift_status_id", "code", "COMPLETED")
+            with self._connect() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        "UPDATE work_shift SET shift_status_id = %s WHERE shift_id = %s",
+                        (completed_status_id, assignment["shift_id"]),
+                    )
+                    cursor.execute(
+                        """
+                        UPDATE shift_assignment
+                        SET check_out_time = COALESCE(check_out_time, NOW())
+                        WHERE assignment_id = %s
+                        """,
+                        (assignment["assignment_id"],),
+                    )
+                connection.commit()
+            self.reload_from_mysql()
+        except Error as exc:
+            return f"Ошибка закрытия смены в MySQL: {exc}"
+        return "Смена помечена как закрытая в MySQL."
+
+    def add_reservation(
+        self, guest: str, phone: str, table: str, date_time: datetime, guests: int, status: str
+    ) -> dict:
+        if not self.mysql_enabled:
+            self.last_error = "MySQL не подключен. Бронь не сохранена."
+            return {}
+
+        try:
+            user_id = self._current_mysql_user_id()
+            if user_id is None:
+                self.last_error = "Нужно войти пользователем из MySQL, чтобы создать бронь."
+                return {}
 
             status_id = self._get_id(
                 "reservation_status",
@@ -197,21 +386,26 @@ class MySQLBackedStore(DemoStore):
                         """,
                         (guest_id, table_id, status_id, date_time, reserved_to, guests, user_id),
                     )
-                    reservation["reservation_id"] = cursor.lastrowid
+                    reservation_id = cursor.lastrowid
                 connection.commit()
-        except Error:
-            pass
+            self.reload_from_mysql()
+            return next(
+                (item for item in self.reservations if item.get("reservation_id") == reservation_id),
+                {},
+            )
+        except Error as exc:
+            self.last_error = f"Ошибка записи брони в MySQL: {exc}"
+            return {}
 
-        return reservation
+        return {}
 
     def set_reservation_status(self, index: int, status: str) -> str:
-        message = super().set_reservation_status(index, status)
         if not self.mysql_enabled or index < 0 or index >= len(self.reservations):
-            return message
+            return "MySQL не подключен или бронь не выбрана."
 
         reservation_id = self.reservations[index].get("reservation_id")
         if reservation_id is None:
-            return message
+            return "Эта бронь не связана с записью в MySQL."
 
         try:
             status_id = self._get_id(
@@ -227,20 +421,24 @@ class MySQLBackedStore(DemoStore):
                         (status_id, reservation_id),
                     )
                 connection.commit()
-        except Error:
-            pass
-        return message
+            self.reload_from_mysql()
+        except Error as exc:
+            return f"Ошибка изменения статуса брони в MySQL: {exc}"
+        return f"Статус брони изменён: {status}."
 
     def send_draft_to_kitchen(self, table_code: str, payment_method: str) -> tuple[bool, str]:
         draft_snapshot = [item.copy() for item in self.order_draft]
-        success, message = super().send_draft_to_kitchen(table_code, payment_method)
-        if not success or not self.mysql_enabled:
-            return success, message
+        if not draft_snapshot:
+            return False, "Сначала добавь блюда в заказ."
+        if not self.mysql_enabled:
+            return False, "MySQL не подключен. Заказ не сохранен."
+        if not table_code or table_code not in {table["code"] for table in self.tables}:
+            return False, "В базе нет выбранного активного стола. Заказ не сохранен."
 
         try:
             user_id = self._current_mysql_user_id()
             if user_id is None:
-                return success, message
+                return False, "Нужно войти пользователем из MySQL, чтобы создать заказ."
 
             table_id = self._get_id("restaurant_table", "table_id", "code", table_code)
             order_status_id = self._get_id("order_status", "order_status_id", "code", "ACCEPTED")
@@ -251,6 +449,14 @@ class MySQLBackedStore(DemoStore):
                 "code",
                 PAYMENT_TO_CODE.get(payment_method, "CASH"),
             )
+            prepared_items = []
+            for item in draft_snapshot:
+                dish_id = self._get_dish_id(item["name"])
+                if dish_id is None:
+                    return False, f"Блюдо не найдено в MySQL: {item['name']}."
+                prepared_items.append((dish_id, item))
+            if not prepared_items:
+                return False, "В заказе нет позиций, связанных с блюдами MySQL."
 
             with self._connect() as connection:
                 with connection.cursor() as cursor:
@@ -267,10 +473,7 @@ class MySQLBackedStore(DemoStore):
                         (table_id, order_status_id, user_id, payment_method_id),
                     )
                     order_id = cursor.lastrowid
-                    for item in draft_snapshot:
-                        dish_id = self._get_dish_id(item["name"])
-                        if dish_id is None:
-                            continue
+                    for dish_id, item in prepared_items:
                         cursor.execute(
                             """
                             INSERT INTO order_item (
@@ -285,15 +488,99 @@ class MySQLBackedStore(DemoStore):
                             (order_id, dish_id, item_status_id, item["qty"], item["price"]),
                         )
                 connection.commit()
-        except Error:
-            pass
+            self.clear_draft()
+            self.reload_from_mysql()
+            return True, f"Заказ GS-{order_id} сохранен в MySQL и отправлен на кухню."
+        except Error as exc:
+            return False, f"Ошибка записи заказа в MySQL: {exc}"
 
-        return success, message
+        return False, "Заказ не сохранен."
+
+    def advance_order_status(self, index: int) -> str:
+        if not self.mysql_enabled or index < 0 or index >= len(self.kitchen_queue):
+            return "MySQL не подключен или заказ не выбран."
+
+        order = self.kitchen_queue[index]
+        current_code = ORDER_STATUS_TO_CODE.get(order["status"], "ACCEPTED")
+        try:
+            current_pos = ORDER_STATUS_SEQUENCE.index(current_code)
+        except ValueError:
+            current_pos = 0
+        next_code = ORDER_STATUS_SEQUENCE[min(current_pos + 1, len(ORDER_STATUS_SEQUENCE) - 1)]
+
+        return self._set_order_status(order, next_code)
+
+    def advance_kitchen_order(self, index: int) -> str:
+        if not self.mysql_enabled or index < 0 or index >= len(self.kitchen_queue):
+            return "MySQL не подключен или заказ не выбран."
+
+        order = self.kitchen_queue[index]
+        current_code = ORDER_STATUS_TO_CODE.get(order["status"], "ACCEPTED")
+        if current_code == "READY":
+            return "Заказ уже отмечен как готовый."
+        if current_code in {"SERVED", "CLOSED"}:
+            return "Заказ уже выдан или закрыт."
+
+        next_code = "READY" if current_code == "PREPARING" else "PREPARING"
+        return self._set_order_status(order, next_code)
+
+    def _set_order_status(self, order: dict, next_code: str) -> str:
+        try:
+            status_id = self._get_id("order_status", "order_status_id", "code", next_code)
+            item_status_code = {
+                "ACCEPTED": "QUEUED",
+                "PREPARING": "COOKING",
+                "READY": "READY",
+                "SERVED": "SERVED",
+            }[next_code]
+            item_status_id = self._get_id("order_item_status", "order_item_status_id", "code", item_status_code)
+            with self._connect() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        "UPDATE customer_order SET order_status_id = %s WHERE order_id = %s",
+                        (status_id, order["order_id"]),
+                    )
+                    cursor.execute(
+                        "UPDATE order_item SET order_item_status_id = %s WHERE order_id = %s",
+                        (item_status_id, order["order_id"]),
+                    )
+                connection.commit()
+            self.reload_from_mysql()
+        except Error as exc:
+            return f"Ошибка изменения статуса заказа в MySQL: {exc}"
+        return f"Статус заказа изменён: {_order_status_ru(next_code)}."
+
+    def complete_order(self, index: int) -> str:
+        if not self.mysql_enabled or index < 0 or index >= len(self.kitchen_queue):
+            return "MySQL не подключен или заказ не выбран."
+
+        order = self.kitchen_queue[index]
+        try:
+            closed_status_id = self._get_id("order_status", "order_status_id", "code", "CLOSED")
+            served_item_status_id = self._get_id("order_item_status", "order_item_status_id", "code", "SERVED")
+            with self._connect() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        UPDATE customer_order
+                        SET order_status_id = %s, closed_at = COALESCE(closed_at, NOW())
+                        WHERE order_id = %s
+                        """,
+                        (closed_status_id, order["order_id"]),
+                    )
+                    cursor.execute(
+                        "UPDATE order_item SET order_item_status_id = %s WHERE order_id = %s",
+                        (served_item_status_id, order["order_id"]),
+                    )
+                connection.commit()
+            self.reload_from_mysql()
+        except Error as exc:
+            return f"Ошибка закрытия заказа в MySQL: {exc}"
+        return f"Заказ GS-{order['order_id']} закрыт в MySQL."
 
     def apply_inventory_operation(self, ingredient: str, operation_type: str, amount: float, note: str) -> str:
-        message = super().apply_inventory_operation(ingredient, operation_type, amount, note)
         if not self.mysql_enabled:
-            return message
+            return "MySQL не подключен. Операция не сохранена."
 
         try:
             ingredient_id = self._get_id("ingredient", "ingredient_id", "name", ingredient)
@@ -321,16 +608,37 @@ class MySQLBackedStore(DemoStore):
                         (ingredient_id, operation_type_id, quantity, user_id, note or "Операция из интерфейса"),
                     )
                 connection.commit()
-        except Error:
-            pass
+            self.reload_from_mysql()
+        except Error as exc:
+            return f"Ошибка записи складской операции в MySQL: {exc}"
 
-        return message
+        return "Операция по складу сохранена в MySQL."
 
     def _load_roles(self) -> None:
         rows = self._fetch_all("SELECT code FROM employee_role ORDER BY role_id")
-        roles = [ROLE_CODE_TO_RU.get(row["code"], row["code"]) for row in rows]
-        if roles:
-            self.role_options = roles
+        self.role_options = [ROLE_CODE_TO_RU.get(row["code"], row["code"]) for row in rows]
+
+    def _ensure_reservation_statuses(self) -> None:
+        status_names = {
+            "PENDING": "Pending",
+            "CONFIRMED": "Confirmed",
+            "SEATED": "Seated",
+            "COMPLETED": "Completed",
+            "CANCELLED": "Cancelled",
+            "NO_SHOW": "No show",
+        }
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                for code, name in status_names.items():
+                    cursor.execute(
+                        """
+                        INSERT INTO reservation_status (code, name)
+                        VALUES (%s, %s)
+                        ON DUPLICATE KEY UPDATE name = VALUES(name)
+                        """,
+                        (code, name),
+                    )
+            connection.commit()
 
     def _load_users(self) -> None:
         rows = self._fetch_all(
@@ -351,18 +659,17 @@ class MySQLBackedStore(DemoStore):
             ORDER BY au.user_id
             """
         )
-        if rows:
-            self.users = [
-                {
-                    "user_id": row["user_id"],
-                    "employee_id": row["employee_id"],
-                    "full_name": _join_full_name(row["last_name"], row["first_name"], row["middle_name"]),
-                    "login": row["login"],
-                    "password": row["password_hash"],
-                    "role": ROLE_CODE_TO_RU.get(row["role_code"], row["role_code"]),
-                }
-                for row in rows
-            ]
+        self.users = [
+            {
+                "user_id": row["user_id"],
+                "employee_id": row["employee_id"],
+                "full_name": _join_full_name(row["last_name"], row["first_name"], row["middle_name"]),
+                "login": row["login"],
+                "password": row["password_hash"],
+                "role": ROLE_CODE_TO_RU.get(row["role_code"], row["role_code"]),
+            }
+            for row in rows
+        ]
 
     def _load_employees(self) -> None:
         rows = self._fetch_all(
@@ -372,22 +679,35 @@ class MySQLBackedStore(DemoStore):
                 e.first_name,
                 e.middle_name,
                 er.code AS role_code,
-                e.is_active
+                e.employee_id,
+                e.is_active,
+                GROUP_CONCAT(s.name ORDER BY es.skill_level DESC, s.name SEPARATOR ', ') AS skills,
+                MAX(CASE
+                    WHEN ss.code IN ('PLANNED', 'IN_PROGRESS')
+                     AND ws.planned_end >= NOW()
+                    THEN 1 ELSE 0
+                END) AS has_active_shift
             FROM employee e
             JOIN employee_role er ON er.role_id = e.role_id
+            LEFT JOIN employee_skill es ON es.employee_id = e.employee_id
+            LEFT JOIN skill s ON s.skill_id = es.skill_id
+            LEFT JOIN shift_assignment sa ON sa.employee_id = e.employee_id
+            LEFT JOIN work_shift ws ON ws.shift_id = sa.shift_id
+            LEFT JOIN shift_status ss ON ss.shift_status_id = ws.shift_status_id
+            GROUP BY e.employee_id, e.last_name, e.first_name, e.middle_name, er.code, e.is_active
             ORDER BY e.last_name, e.first_name
             """
         )
-        if rows:
-            self.employees = [
-                {
-                    "name": _join_full_name(row["last_name"], row["first_name"], row["middle_name"]),
-                    "role": ROLE_CODE_TO_RU.get(row["role_code"], row["role_code"]),
-                    "skill": "Из базы данных",
-                    "status": "Свободен" if row["is_active"] else "Неактивен",
-                }
-                for row in rows
-            ]
+        self.employees = [
+            {
+                "employee_id": row["employee_id"],
+                "name": _join_full_name(row["last_name"], row["first_name"], row["middle_name"]),
+                "role": ROLE_CODE_TO_RU.get(row["role_code"], row["role_code"]),
+                "skill": row["skills"] or "Из базы данных",
+                "status": _employee_status(row["is_active"], row["has_active_shift"]),
+            }
+            for row in rows
+        ]
 
     def _load_tables(self) -> None:
         rows = self._fetch_all(
@@ -398,11 +718,10 @@ class MySQLBackedStore(DemoStore):
             ORDER BY code
             """
         )
-        if rows:
-            self.tables = [
-                {"code": row["code"], "seats": row["seats_count"], "occupied": False}
-                for row in rows
-            ]
+        self.tables = [
+            {"code": row["code"], "seats": row["seats_count"], "occupied": False}
+            for row in rows
+        ]
 
     def _load_reservations(self) -> None:
         rows = self._fetch_all(
@@ -423,19 +742,18 @@ class MySQLBackedStore(DemoStore):
             LIMIT 50
             """
         )
-        if rows:
-            self.reservations = [
-                {
-                    "reservation_id": row["reservation_id"],
-                    "guest": row["guest"],
-                    "phone": row["phone"] or "",
-                    "table": row["table_code"] or "-",
-                    "time": row["reserved_from"].strftime("%d.%m %H:%M"),
-                    "guests": row["guest_count"],
-                    "status": _reservation_status_ru(row["status_code"]),
-                }
-                for row in rows
-            ]
+        self.reservations = [
+            {
+                "reservation_id": row["reservation_id"],
+                "guest": row["guest"],
+                "phone": row["phone"] or "",
+                "table": row["table_code"] or "-",
+                "time": row["reserved_from"].strftime("%d.%m %H:%M"),
+                "guests": row["guest_count"],
+                "status": _reservation_status_ru(row["status_code"]),
+            }
+            for row in rows
+        ]
 
     def _load_menu(self) -> None:
         rows = self._fetch_all(
@@ -451,16 +769,15 @@ class MySQLBackedStore(DemoStore):
             ORDER BY mc.sort_order, mc.name, d.name
             """
         )
-        if rows:
-            self.menu = [
-                {
-                    "category": row["category"],
-                    "name": row["name"],
-                    "price": int(row["base_price"]),
-                    "ready": f"{row['prep_time_minutes'] or 10} мин",
-                }
-                for row in rows
-            ]
+        self.menu = [
+            {
+                "category": row["category"],
+                "name": row["name"],
+                "price": int(row["base_price"]),
+                "ready": f"{row['prep_time_minutes'] or 10} мин",
+            }
+            for row in rows
+        ]
 
     def _load_inventory(self) -> None:
         rows = self._fetch_all(
@@ -478,16 +795,42 @@ class MySQLBackedStore(DemoStore):
             ORDER BY i.name
             """
         )
-        if rows:
-            self.inventory = [
-                {
-                    "ingredient": row["ingredient"],
-                    "stock": _to_float(row["stock"]),
-                    "unit": _unit_ru(row["unit_code"], row["unit_name"]),
-                    "threshold": _to_float(row["critical_level"]),
-                }
-                for row in rows
-            ]
+        self.inventory = [
+            {
+                "ingredient": row["ingredient"],
+                "stock": _to_float(row["stock"]),
+                "unit": _unit_ru(row["unit_code"], row["unit_name"]),
+                "threshold": _to_float(row["critical_level"]),
+            }
+            for row in rows
+        ]
+
+    def _load_operations(self) -> None:
+        rows = self._fetch_all(
+            """
+            SELECT
+                io.operation_datetime,
+                i.name AS ingredient,
+                sot.code AS operation_code,
+                io.quantity,
+                io.note
+            FROM inventory_operation io
+            JOIN ingredient i ON i.ingredient_id = io.ingredient_id
+            JOIN stock_operation_type sot ON sot.stock_operation_type_id = io.stock_operation_type_id
+            ORDER BY io.operation_datetime DESC, io.operation_id DESC
+            LIMIT 50
+            """
+        )
+        self.operations = [
+            {
+                "time": row["operation_datetime"].strftime("%d.%m %H:%M"),
+                "ingredient": row["ingredient"],
+                "type": _stock_operation_ru(row["operation_code"]),
+                "amount": _to_float(row["quantity"]),
+                "note": row["note"] or "",
+            }
+            for row in rows
+        ]
 
     def _load_kitchen_queue(self) -> None:
         rows = self._fetch_all(
@@ -496,6 +839,7 @@ class MySQLBackedStore(DemoStore):
                 co.order_id,
                 rt.code AS table_code,
                 os.code AS status_code,
+                co.created_at,
                 COALESCE(total.total_amount, 0) AS total_amount,
                 GROUP_CONCAT(d.name ORDER BY d.name SEPARATOR ', ') AS items
             FROM customer_order co
@@ -505,22 +849,100 @@ class MySQLBackedStore(DemoStore):
             LEFT JOIN dish d ON d.dish_id = oi.dish_id
             LEFT JOIN v_order_total total ON total.order_id = co.order_id
             WHERE os.code <> 'CLOSED'
-            GROUP BY co.order_id, rt.code, os.code, total.total_amount
-            ORDER BY co.created_at DESC
+            GROUP BY co.order_id, rt.code, os.code, co.created_at, total.total_amount
+            ORDER BY FIELD(os.code, 'ACCEPTED', 'PREPARING', 'READY', 'SERVED'), co.created_at ASC
             LIMIT 30
             """
         )
-        if rows:
-            self.kitchen_queue = [
-                {
-                    "order_no": f"GS-{row['order_id']}",
-                    "table": row["table_code"] or "-",
-                    "items": row["items"] or "Позиции не указаны",
-                    "status": _order_status_ru(row["status_code"]),
-                    "total": int(row["total_amount"] or 0),
-                }
-                for row in rows
-            ]
+        self.kitchen_queue = [
+            {
+                "order_id": row["order_id"],
+                "order_no": f"GS-{row['order_id']}",
+                "table": row["table_code"] or "-",
+                "created": row["created_at"].strftime("%H:%M") if row["created_at"] else "-",
+                "items": row["items"] or "Позиции не указаны",
+                "status": _order_status_ru(row["status_code"]),
+                "total": int(row["total_amount"] or 0),
+            }
+            for row in rows
+        ]
+
+    def _load_assignments(self) -> None:
+        rows = self._fetch_all(
+            """
+            SELECT
+                sa.assignment_id,
+                sa.shift_id,
+                sa.employee_id,
+                ws.planned_start,
+                ws.planned_end,
+                st.code AS shift_type_code,
+                ss.code AS shift_status_code,
+                e.last_name,
+                e.first_name,
+                e.middle_name,
+                er.code AS role_code
+            FROM shift_assignment sa
+            JOIN work_shift ws ON ws.shift_id = sa.shift_id
+            JOIN shift_type st ON st.shift_type_id = ws.shift_type_id
+            JOIN shift_status ss ON ss.shift_status_id = ws.shift_status_id
+            JOIN employee e ON e.employee_id = sa.employee_id
+            JOIN employee_role er ON er.role_id = sa.assignment_role_id
+            ORDER BY ws.planned_start DESC, sa.assignment_id DESC
+            LIMIT 50
+            """
+        )
+        self.assignments = [
+            {
+                "assignment_id": row["assignment_id"],
+                "shift_id": row["shift_id"],
+                "employee_id": row["employee_id"],
+                "date": row["planned_start"].strftime("%d.%m.%Y"),
+                "shift": _shift_label(row["shift_type_code"], row["planned_start"], row["planned_end"]),
+                "employee": _join_full_name(row["last_name"], row["first_name"], row["middle_name"]),
+                "role": ROLE_CODE_TO_RU.get(row["role_code"], row["role_code"]),
+                "status": SHIFT_STATUS_TO_RU.get(row["shift_status_code"], row["shift_status_code"]),
+            }
+            for row in rows
+        ]
+
+    def _load_dashboard_data(self) -> None:
+        hourly_rows = self._fetch_all(
+            """
+            SELECT HOUR(co.created_at) AS order_hour, COUNT(*) AS order_count
+            FROM customer_order co
+            WHERE DATE(co.created_at) = CURRENT_DATE()
+            GROUP BY HOUR(co.created_at)
+            ORDER BY order_hour
+            """
+        )
+        hour_counts = {int(row["order_hour"]): int(row["order_count"]) for row in hourly_rows}
+        self.sales_by_hour = [hour_counts.get(hour, 0) for hour in range(8, 24, 2)]
+
+        top_rows = self._fetch_all(
+            """
+            SELECT d.name, SUM(oi.quantity) AS dish_count
+            FROM order_item oi
+            JOIN dish d ON d.dish_id = oi.dish_id
+            JOIN customer_order co ON co.order_id = oi.order_id
+            WHERE DATE(co.created_at) = CURRENT_DATE()
+            GROUP BY d.dish_id, d.name
+            ORDER BY dish_count DESC, d.name
+            LIMIT 5
+            """
+        )
+        if top_rows:
+            self.top_dishes = {row["name"]: int(row["dish_count"]) for row in top_rows}
+        else:
+            self.top_dishes = {item["name"]: 0 for item in self.menu[:5]} or {"Нет данных": 0}
+
+        self.alerts = []
+        for item in self.low_stock_items()[:4]:
+            self.alerts.append(
+                f"Низкий остаток: {item['ingredient']} ({item['stock']} {item['unit']}, минимум {item['threshold']})."
+            )
+        if not self.alerts:
+            self.alerts.append("Критичных складских остатков нет.")
 
     def _authenticate_mysql(self, login: str, password: str) -> dict | None:
         row = self._fetch_one(
@@ -574,6 +996,32 @@ class MySQLBackedStore(DemoStore):
         row = self._fetch_one("SELECT dish_id FROM dish WHERE name = %s LIMIT 1", (dish_name,))
         return int(row["dish_id"]) if row else None
 
+    def _get_employee_by_full_name(self, full_name: str) -> dict | None:
+        for employee in self.employees:
+            if employee["name"] == full_name:
+                return self._fetch_one(
+                    """
+                    SELECT e.employee_id, e.role_id
+                    FROM employee e
+                    WHERE e.employee_id = %s
+                    LIMIT 1
+                    """,
+                    (employee["employee_id"],),
+                )
+
+        last_name, first_name, middle_name = _split_full_name(full_name)
+        return self._fetch_one(
+            """
+            SELECT employee_id, role_id
+            FROM employee
+            WHERE last_name = %s
+              AND first_name = %s
+              AND (middle_name <=> %s)
+            LIMIT 1
+            """,
+            (last_name, first_name, middle_name),
+        )
+
     def _get_id(self, table: str, id_column: str, lookup_column: str, lookup_value: str) -> int:
         row = self._fetch_one(
             f"SELECT {id_column} FROM {table} WHERE {lookup_column} = %s LIMIT 1",
@@ -623,6 +1071,9 @@ def _join_full_name(last_name: str, first_name: str, middle_name: str | None) ->
 def _reservation_status_ru(code: str) -> str:
     return {
         "ACTIVE": "Подтверждена",
+        "PENDING": "Ожидается",
+        "CONFIRMED": "Подтверждена",
+        "SEATED": "Гость в зале",
         "COMPLETED": "Завершена",
         "CANCELLED": "Отменена",
         "NO_SHOW": "Не пришел",
@@ -639,6 +1090,44 @@ def _order_status_ru(code: str) -> str:
         "CLOSED": "Закрыт",
         "CANCELLED": "Отменен",
     }.get(code, code)
+
+
+def _stock_operation_ru(code: str) -> str:
+    return {
+        "RECEIPT": "Поступление",
+        "WRITE_OFF": "Списание",
+        "ADJUSTMENT_IN": "Корректировка",
+        "ADJUSTMENT_OUT": "Корректировка",
+    }.get(code, code)
+
+
+def _employee_status(is_active: int, has_active_shift: int | None) -> str:
+    if not is_active:
+        return "Неактивен"
+    if has_active_shift:
+        return "На смене"
+    return "Свободен"
+
+
+def _shift_label(code: str, planned_start: datetime, planned_end: datetime) -> str:
+    name = {
+        "MORNING": "Утро",
+        "DAY": "День",
+        "EVENING": "Вечер",
+        "NIGHT": "Ночь",
+    }.get(code, "Смена")
+    return f"{name} {planned_start:%H:%M}-{planned_end:%H:%M}"
+
+
+def _as_time(value) -> time:
+    if isinstance(value, time):
+        return value
+    if isinstance(value, timedelta):
+        seconds = int(value.total_seconds())
+        hours, remainder = divmod(seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        return time(hour=hours % 24, minute=minutes, second=seconds)
+    return value
 
 
 def _unit_ru(code: str, name: str) -> str:

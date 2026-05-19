@@ -31,12 +31,42 @@ QTableWidget {
     selection-background-color: #D8F0F1;
 }
 
+QComboBox QAbstractItemView {
+    background-color: #FFFFFF;
+    color: #1E293B;
+    border: 1px solid #CBD5E1;
+    selection-color: #1E293B;
+    selection-background-color: #D8F0F1;
+    outline: 0;
+}
+
+QComboBox QAbstractItemView::item {
+    color: #1E293B;
+    min-height: 28px;
+    padding: 6px 10px;
+}
+
+QComboBox QAbstractItemView::item:selected {
+    color: #1E293B;
+    background-color: #D8F0F1;
+}
+
 QTableWidget {
     gridline-color: #E2E8F0;
 }
 
+QTableWidget::item {
+    color: #1E293B;
+}
+
+QTableWidget::item:selected {
+    color: #1E293B;
+    background-color: #D8F0F1;
+}
+
 QHeaderView::section {
     background-color: #F1F5F9;
+    color: #1E293B;
     padding: 10px;
     border: none;
     border-bottom: 1px solid #E2E8F0;
@@ -88,4 +118,24 @@ QLabel#statusPill {
 QLabel#statusPill[tone="info"] {
     color: #1F686E;
     background-color: #D8F0F1;
+}
+
+QLabel#statusPill[tone="success"] {
+    color: #0F766E;
+    background-color: #CCFBF1;
+}
+
+QLabel#statusPill[tone="warning"] {
+    color: #B45309;
+    background-color: #FEF3C7;
+}
+
+QLabel#statusPill[tone="danger"] {
+    color: #991B1B;
+    background-color: #FEE2E2;
+}
+
+QLabel#statusPill[tone="muted"] {
+    color: #475569;
+    background-color: #E2E8F0;
 }

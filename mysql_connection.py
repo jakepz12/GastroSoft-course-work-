@@ -17,7 +17,7 @@ DEFAULT_SQL_PATH = PROJECT_ROOT / "gastrosoft_mysql.sql"
 @dataclass(slots=True)
 class MySQLConfig:
     host: str = "127.0.0.1"
-    port: int = 3306
+    port: int = 3307
     user: str = "root"
     password: str = ""
     database: str = "gastrosoft_course"
@@ -92,20 +92,29 @@ class MySQLConnectionManager:
         if not self.sql_path.exists():
             return False, f"SQL-файл не найден: {self.sql_path}"
 
-        script = self.sql_path.read_text(encoding="utf-8")
+        return self.execute_sql_file(self.sql_path, include_database=False)
+
+    def execute_sql_file(self, sql_path: Path, include_database: bool = True) -> tuple[bool, str]:
+        if not sql_path.exists():
+            return False, f"SQL-файл не найден: {sql_path}"
+
+        script = sql_path.read_text(encoding="utf-8")
         statements = _split_sql_script(script)
         if not statements:
             return False, "SQL-файл пустой или не содержит исполняемых команд."
 
         try:
-            with self.connect(include_database=False) as connection:
+            with self.connect(include_database=include_database) as connection:
                 with connection.cursor() as cursor:
                     for statement in statements:
                         cursor.execute(statement)
+                        if cursor.with_rows:
+                            for row in cursor.fetchall():
+                                print(" | ".join(str(value) for value in row))
                 connection.commit()
-            return True, f"Схема из {self.sql_path.name} успешно применена."
+            return True, f"SQL-файл {sql_path.name} успешно выполнен."
         except Error as exc:
-            return False, f"Не удалось применить SQL-схему: {exc}"
+            return False, f"Не удалось выполнить SQL-файл: {exc}"
 
 
 def _split_sql_script(script: str) -> list[str]:
@@ -160,6 +169,10 @@ def main() -> int:
         action="store_true",
         help="Проверить доступ к указанной базе данных",
     )
+    parser.add_argument(
+        "--run-sql",
+        help="Выполнить указанный SQL-файл через mysql_config.json без консольного клиента mysql",
+    )
     args = parser.parse_args()
 
     manager = MySQLConnectionManager(
@@ -184,9 +197,17 @@ def main() -> int:
         if not ok:
             return 1
 
+    if args.run_sql:
+        run_sql_path = Path(args.run_sql)
+        if not run_sql_path.is_absolute():
+            run_sql_path = PROJECT_ROOT / run_sql_path
+        ok, message = manager.execute_sql_file(run_sql_path)
+        print(message)
+        if not ok:
+            return 1
+
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

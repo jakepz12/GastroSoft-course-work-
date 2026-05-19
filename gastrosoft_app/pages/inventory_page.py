@@ -64,7 +64,7 @@ class InventoryPage(QWidget):
         side_column = QVBoxLayout()
         side_column.setSpacing(18)
 
-        operation_card = SectionCard("Операция по складу", "Кнопка меняет данные остатков в демо-хранилище.")
+        operation_card = SectionCard("Операция по складу", "Кнопка сохраняет движение ингредиента в MySQL.")
         self.ingredient_combo = QComboBox()
         operation_card.content_layout.addWidget(self.ingredient_combo)
 
@@ -159,7 +159,7 @@ class InventoryPage(QWidget):
     def refresh_summary(self) -> None:
         self.summary_cards["items"].set_value(str(len(self.store.inventory)), "Позиции в inventory_operation и рецептурах")
         self.summary_cards["critical"].set_value(str(len(self.store.low_stock_items())), "Ниже или на уровне минимального порога")
-        self.summary_cards["operations"].set_value(str(len(self.store.operations)), "Журнал хранит историю демо-изменений")
+        self.summary_cards["operations"].set_value(str(len(self.store.operations)), "Журнал хранит движения из базы данных")
 
     def apply_operation(self) -> None:
         message = self.store.apply_inventory_operation(
