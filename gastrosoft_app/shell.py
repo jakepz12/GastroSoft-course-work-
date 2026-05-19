@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
@@ -32,6 +33,7 @@ class GastroSoftWindow(QMainWindow):
         self.project_root = Path(__file__).resolve().parent.parent
         self.store = MySQLBackedStore(self.project_root)
         self.page_widgets: dict[str, QWidget] = {}
+        self.page_containers: dict[str, QScrollArea] = {}
         self.nav_buttons: dict[str, QPushButton] = {}
         self.nav_titles = {
             "dashboard": "Главная панель",
@@ -172,8 +174,24 @@ class GastroSoftWindow(QMainWindow):
             "inventory": inventory_page,
         }
 
-        for page in self.page_widgets.values():
-            self.stack.addWidget(page)
+        for page_key, page in self.page_widgets.items():
+            page_container = self._wrap_page(page)
+            self.page_containers[page_key] = page_container
+            self.stack.addWidget(page_container)
+
+    def _wrap_page(self, page: QWidget) -> QScrollArea:
+        page.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+        scroll_area = QScrollArea()
+        scroll_area.setObjectName("pageScrollArea")
+        scroll_area.viewport().setObjectName("pageScrollViewport")
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        scroll_area.setWidget(page)
+        return scroll_area
 
     def on_authenticated(self, user: dict) -> None:
         self.store.current_user = user
@@ -200,7 +218,7 @@ class GastroSoftWindow(QMainWindow):
                 page_key = default_page_for_role(self._current_role())
 
         widget = self.page_widgets[page_key]
-        self.stack.setCurrentWidget(widget)
+        self.stack.setCurrentWidget(self.page_containers[page_key])
 
         title, subtitle = self.page_meta[page_key]
         title, subtitle = page_meta_for_role(self._current_role(), page_key, (title, subtitle))
