@@ -26,9 +26,9 @@ ROLE_CODE_TO_RU = {
 RU_ROLE_TO_CODE = {value: key for key, value in ROLE_CODE_TO_RU.items()}
 
 RESERVATION_STATUS_TO_CODE = {
-    "Ожидается": "ACTIVE",
-    "Подтверждена": "ACTIVE",
-    "Гость в зале": "ACTIVE",
+    "Ожидается": "PENDING",
+    "Подтверждена": "CONFIRMED",
+    "Гость в зале": "SEATED",
     "Завершена": "COMPLETED",
     "Отменена": "CANCELLED",
     "Не пришел": "NO_SHOW",
@@ -89,6 +89,7 @@ class MySQLBackedStore(DemoStore):
             self.mysql_status = message
             if ok:
                 self.mysql_enabled = True
+                self._ensure_reservation_statuses()
                 self.reload_from_mysql()
         except Exception as exc:
             self.mysql_enabled = False
@@ -617,6 +618,28 @@ class MySQLBackedStore(DemoStore):
         rows = self._fetch_all("SELECT code FROM employee_role ORDER BY role_id")
         self.role_options = [ROLE_CODE_TO_RU.get(row["code"], row["code"]) for row in rows]
 
+    def _ensure_reservation_statuses(self) -> None:
+        status_names = {
+            "PENDING": "Pending",
+            "CONFIRMED": "Confirmed",
+            "SEATED": "Seated",
+            "COMPLETED": "Completed",
+            "CANCELLED": "Cancelled",
+            "NO_SHOW": "No show",
+        }
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                for code, name in status_names.items():
+                    cursor.execute(
+                        """
+                        INSERT INTO reservation_status (code, name)
+                        VALUES (%s, %s)
+                        ON DUPLICATE KEY UPDATE name = VALUES(name)
+                        """,
+                        (code, name),
+                    )
+            connection.commit()
+
     def _load_users(self) -> None:
         rows = self._fetch_all(
             """
@@ -1048,6 +1071,9 @@ def _join_full_name(last_name: str, first_name: str, middle_name: str | None) ->
 def _reservation_status_ru(code: str) -> str:
     return {
         "ACTIVE": "Подтверждена",
+        "PENDING": "Ожидается",
+        "CONFIRMED": "Подтверждена",
+        "SEATED": "Гость в зале",
         "COMPLETED": "Завершена",
         "CANCELLED": "Отменена",
         "NO_SHOW": "Не пришел",

@@ -600,6 +600,9 @@ INSERT INTO swap_request_status (code, name) VALUES
 
 INSERT INTO reservation_status (code, name) VALUES
   ('ACTIVE', 'Active'),
+  ('PENDING', 'Pending'),
+  ('CONFIRMED', 'Confirmed'),
+  ('SEATED', 'Seated'),
   ('COMPLETED', 'Completed'),
   ('CANCELLED', 'Cancelled'),
   ('NO_SHOW', 'No show');
@@ -703,7 +706,7 @@ INSERT INTO reservation (
   (
     (SELECT guest_id FROM guest WHERE phone = '+7 912 555-11-22'),
     (SELECT table_id FROM restaurant_table WHERE code = 'T-06'),
-    (SELECT reservation_status_id FROM reservation_status WHERE code = 'ACTIVE'),
+    (SELECT reservation_status_id FROM reservation_status WHERE code = 'CONFIRMED'),
     DATE_ADD(NOW(), INTERVAL 1 HOUR),
     DATE_ADD(NOW(), INTERVAL 3 HOUR),
     5,
@@ -712,7 +715,7 @@ INSERT INTO reservation (
   (
     (SELECT guest_id FROM guest WHERE phone = '+7 922 100-50-40'),
     (SELECT table_id FROM restaurant_table WHERE code = 'T-02'),
-    (SELECT reservation_status_id FROM reservation_status WHERE code = 'ACTIVE'),
+    (SELECT reservation_status_id FROM reservation_status WHERE code = 'PENDING'),
     DATE_ADD(NOW(), INTERVAL 2 HOUR),
     DATE_ADD(NOW(), INTERVAL 4 HOUR),
     2,

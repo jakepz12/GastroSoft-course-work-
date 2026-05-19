@@ -4,7 +4,8 @@ QWidget#reservationsPage {
     font-family: "Segoe UI";
 }
 
-QFrame#sectionCard {
+QFrame#sectionCard,
+QFrame#metricCard {
     background-color: #FFFFFF;
     border: 1px solid #E2E8F0;
     border-radius: 24px;
@@ -16,8 +17,16 @@ QLabel#sectionCardTitle {
     color: #1E293B;
 }
 
-QLabel#sectionCardSubtitle {
+QLabel#sectionCardSubtitle,
+QLabel#metricTitle,
+QLabel#metricNote {
     color: #64748B;
+}
+
+QLabel#metricValue {
+    color: #1E293B;
+    font-size: 22px;
+    font-weight: 700;
 }
 
 QLineEdit,
@@ -98,6 +107,12 @@ QPushButton[variant="secondary"] {
 QPushButton[variant="danger"] {
     background-color: #991B1B;
     color: #FFFFFF;
+    border: none;
+}
+
+QPushButton:disabled {
+    background-color: #E2E8F0;
+    color: #94A3B8;
     border: none;
 }
 
