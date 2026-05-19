@@ -14,25 +14,33 @@ class SectionCard(QFrame):
     def __init__(self, title: str = "", subtitle: str = "") -> None:
         super().__init__()
         self.setObjectName("sectionCard")
+        self.title_label: QLabel | None = None
+        self.subtitle_label: QLabel | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(14)
 
         if title:
-            title_label = QLabel(title)
-            title_label.setObjectName("sectionCardTitle")
-            layout.addWidget(title_label)
+            self.title_label = QLabel(title)
+            self.title_label.setObjectName("sectionCardTitle")
+            layout.addWidget(self.title_label)
 
         if subtitle:
-            subtitle_label = QLabel(subtitle)
-            subtitle_label.setObjectName("sectionCardSubtitle")
-            subtitle_label.setWordWrap(True)
-            layout.addWidget(subtitle_label)
+            self.subtitle_label = QLabel(subtitle)
+            self.subtitle_label.setObjectName("sectionCardSubtitle")
+            self.subtitle_label.setWordWrap(True)
+            layout.addWidget(self.subtitle_label)
 
         self.content_layout = QVBoxLayout()
         self.content_layout.setSpacing(12)
         layout.addLayout(self.content_layout)
+
+    def set_header(self, title: str, subtitle: str) -> None:
+        if self.title_label is not None:
+            self.title_label.setText(title)
+        if self.subtitle_label is not None:
+            self.subtitle_label.setText(subtitle)
 
 
 class MetricCard(QFrame):

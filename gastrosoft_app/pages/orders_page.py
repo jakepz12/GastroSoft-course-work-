@@ -13,10 +13,11 @@ from PySide6.QtWidgets import (
 
 from ..style_utils import load_style
 from ..widgets import SectionCard, StatusPill, apply_button_variant, tint_table_item
+from ..role_access import can_close_orders, can_create_orders, can_process_kitchen
 
 
-KITCHEN_ROLES = {"Повар", "Шеф-повар"}
 KITCHEN_ACTIVE_STATUSES = {"Принят", "Готовится", "Готов"}
+CASHIER_VISIBLE_STATUSES = {"Готов", "Выдан"}
 
 
 class OrdersPage(QWidget):
@@ -51,16 +52,26 @@ class OrdersPage(QWidget):
         self.menu_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.menu_card.content_layout.addWidget(self.menu_table)
 
-        add_button = QPushButton("Добавить в заказ")
-        apply_button_variant(add_button, "primary")
-        add_button.clicked.connect(self.add_selected_dish)
-        self.menu_card.content_layout.addWidget(add_button)
+        self.menu_hint = QLabel("Выбери категорию и блюдо, затем добавь позицию в текущий заказ.")
+        self.menu_hint.setObjectName("sectionCardSubtitle")
+        self.menu_hint.setWordWrap(True)
+        self.menu_card.content_layout.addWidget(self.menu_hint)
+
+        self.add_button = QPushButton("Добавить в заказ")
+        apply_button_variant(self.add_button, "primary")
+        self.add_button.clicked.connect(self.add_selected_dish)
+        self.menu_card.content_layout.addWidget(self.add_button)
         root_layout.addWidget(self.menu_card, 5)
 
         self.order_card = SectionCard("Текущий заказ", "Черновик работает отдельно от кухонной очереди.")
         self.table_combo = QComboBox()
         self.table_combo.addItems([table["code"] for table in self.store.tables])
         self.order_card.content_layout.addWidget(self.table_combo)
+
+        self.order_hint = QLabel("Выбери стол и способ оплаты перед передачей заказа на кухню.")
+        self.order_hint.setObjectName("sectionCardSubtitle")
+        self.order_hint.setWordWrap(True)
+        self.order_card.content_layout.addWidget(self.order_hint)
 
         self.payment_combo = QComboBox()
         self.payment_combo.addItems(["Наличные", "Карта", "QR-оплата"])
@@ -78,21 +89,21 @@ class OrdersPage(QWidget):
         self.order_card.content_layout.addWidget(self.total_pill)
 
         draft_buttons = QHBoxLayout()
-        remove_button = QPushButton("Убрать позицию")
-        apply_button_variant(remove_button, "secondary")
-        remove_button.clicked.connect(self.remove_selected_dish)
-        draft_buttons.addWidget(remove_button)
+        self.remove_button = QPushButton("Убрать позицию")
+        apply_button_variant(self.remove_button, "secondary")
+        self.remove_button.clicked.connect(self.remove_selected_dish)
+        draft_buttons.addWidget(self.remove_button)
 
-        clear_button = QPushButton("Очистить заказ")
-        apply_button_variant(clear_button, "danger")
-        clear_button.clicked.connect(self.clear_order)
-        draft_buttons.addWidget(clear_button)
+        self.clear_button = QPushButton("Очистить заказ")
+        apply_button_variant(self.clear_button, "danger")
+        self.clear_button.clicked.connect(self.clear_order)
+        draft_buttons.addWidget(self.clear_button)
         self.order_card.content_layout.addLayout(draft_buttons)
 
-        send_button = QPushButton("Передать на кухню")
-        apply_button_variant(send_button, "primary")
-        send_button.clicked.connect(self.send_to_kitchen)
-        self.order_card.content_layout.addWidget(send_button)
+        self.send_button = QPushButton("Передать на кухню")
+        apply_button_variant(self.send_button, "primary")
+        self.send_button.clicked.connect(self.send_to_kitchen)
+        self.order_card.content_layout.addWidget(self.send_button)
         root_layout.addWidget(self.order_card, 5)
 
         self.kitchen_card = SectionCard("Очередь кухни", "Отдельные кнопки меняют статус заказа и закрывают его.")
@@ -119,10 +130,10 @@ class OrdersPage(QWidget):
             self.summary_pills[key] = pill
             kitchen_controls_layout.addWidget(pill)
 
-        refresh_button = QPushButton("Обновить")
-        apply_button_variant(refresh_button, "secondary")
-        refresh_button.clicked.connect(self.refresh_kitchen_queue)
-        kitchen_controls_layout.addWidget(refresh_button)
+        self.refresh_queue_button = QPushButton("Обновить")
+        apply_button_variant(self.refresh_queue_button, "secondary")
+        self.refresh_queue_button.clicked.connect(self.refresh_kitchen_queue)
+        kitchen_controls_layout.addWidget(self.refresh_queue_button)
         self.kitchen_card.content_layout.addWidget(self.kitchen_controls)
 
         self.kitchen_table = QTableWidget(0, 4)
@@ -148,6 +159,24 @@ class OrdersPage(QWidget):
 
         root_layout.addWidget(self.kitchen_card, 6)
 
+    def refresh_selectors(self) -> None:
+        self._sync_combo(self.category_combo, self.store.categories(), "Нет блюд в базе")
+        self._sync_combo(self.table_combo, [table["code"] for table in self.store.tables], "Нет активных столов")
+
+    def _sync_combo(self, combo: QComboBox, values: list[str], empty_text: str) -> None:
+        current_value = combo.currentText()
+        combo.blockSignals(True)
+        combo.clear()
+        if values:
+            combo.addItems(values)
+            combo.setEnabled(True)
+            if current_value in values:
+                combo.setCurrentText(current_value)
+        else:
+            combo.addItem(empty_text)
+            combo.setEnabled(False)
+        combo.blockSignals(False)
+
     def populate_dishes(self) -> None:
         dishes = self.store.dishes_by_category(self.category_combo.currentText())
         self.menu_table.setRowCount(len(dishes))
@@ -158,6 +187,10 @@ class OrdersPage(QWidget):
                 self.menu_table.setItem(row_index, column_index, item)
         if dishes:
             self.menu_table.selectRow(0)
+            self.menu_hint.setText("Выбери категорию и блюдо, затем добавь позицию в текущий заказ.")
+        else:
+            self.menu_hint.setText("В базе нет активных блюд для оформления заказа. Заполни справочник меню в MySQL.")
+        self.add_button.setEnabled(bool(dishes) and can_create_orders(self._current_role()))
 
     def populate_draft(self) -> None:
         self.draft_table.setRowCount(len(self.store.order_draft))
@@ -169,13 +202,25 @@ class OrdersPage(QWidget):
                 self.draft_table.setItem(row_index, column_index, item)
 
         self.total_pill.set_state(f"Итого: {self.store.get_draft_total()} ₽", "info")
+        has_draft = bool(self.store.order_draft)
+        has_tables = bool(self.store.tables)
+        self.remove_button.setEnabled(has_draft)
+        self.clear_button.setEnabled(has_draft)
+        self.send_button.setEnabled(has_draft and has_tables and can_create_orders(self._current_role()))
+        if not has_tables:
+            self.order_hint.setText("В базе нет активных столов. Без стола заказ нельзя передать на кухню.")
+        elif not has_draft:
+            self.order_hint.setText("Добавь хотя бы одно блюдо в текущий заказ.")
+        else:
+            self.order_hint.setText("Заказ готов к передаче на кухню.")
 
     def populate_kitchen(self) -> None:
-        is_kitchen = self._is_kitchen_user()
+        role = self._current_role()
+        is_kitchen = can_process_kitchen(role)
         headers = (
             ["Номер", "Стол", "Время", "Состав заказа", "Статус"]
             if is_kitchen
-            else ["Номер", "Стол", "Состав", "Статус"]
+            else ["Номер", "Стол", "Время", "Состав", "Статус"]
         )
         self.kitchen_table.setColumnCount(len(headers))
         self.kitchen_table.setHorizontalHeaderLabels(headers)
@@ -194,7 +239,13 @@ class OrdersPage(QWidget):
                     queue_item["status"],
                 ]
                 if is_kitchen
-                else [queue_item["order_no"], queue_item["table"], queue_item["items"], queue_item["status"]]
+                else [
+                    queue_item["order_no"],
+                    queue_item["table"],
+                    queue_item.get("created", "-"),
+                    queue_item["items"],
+                    queue_item["status"],
+                ]
             )
             for column_index, value in enumerate(values):
                 item = QTableWidgetItem(str(value))
@@ -247,6 +298,12 @@ class OrdersPage(QWidget):
         self.status_message.emit("Черновик заказа очищен.")
 
     def send_to_kitchen(self) -> None:
+        if not can_create_orders(self._current_role()):
+            self.status_message.emit("У этой роли нет права оформлять заказы.")
+            return
+        if not self.store.tables:
+            self.status_message.emit("В базе нет активных столов. Заказ не может быть создан.")
+            return
         success, message = self.store.send_draft_to_kitchen(self.table_combo.currentText(), self.payment_combo.currentText())
         self.populate_draft()
         self.populate_kitchen()
@@ -257,10 +314,10 @@ class OrdersPage(QWidget):
     def advance_status(self) -> None:
         queue_index = self._selected_queue_index()
         if queue_index < 0:
-            self.status_message.emit("Выбери заказ в очереди кухни.")
+            self.status_message.emit("Выбери заказ в списке.")
             return
 
-        if self._is_kitchen_user() and hasattr(self.store, "advance_kitchen_order"):
+        if can_process_kitchen(self._current_role()) and hasattr(self.store, "advance_kitchen_order"):
             message = self.store.advance_kitchen_order(queue_index)
         else:
             message = self.store.advance_order_status(queue_index)
@@ -268,6 +325,9 @@ class OrdersPage(QWidget):
         self.status_message.emit(message)
 
     def complete_order(self) -> None:
+        if not can_close_orders(self._current_role()):
+            self.status_message.emit("У этой роли нет права закрывать заказ.")
+            return
         queue_index = self._selected_queue_index()
         if queue_index < 0:
             self.status_message.emit("Выбери заказ в очереди кухни.")
@@ -284,18 +344,35 @@ class OrdersPage(QWidget):
         self.status_message.emit("Очередь кухни обновлена.")
 
     def refresh_page(self) -> None:
+        if hasattr(self.store, "reload_from_mysql") and getattr(self.store, "mysql_enabled", False):
+            self.store.reload_from_mysql()
         self.apply_role_mode()
+        self.refresh_selectors()
         self.populate_dishes()
         self.populate_draft()
         self.populate_kitchen()
 
     def apply_role_mode(self) -> None:
-        is_kitchen = self._is_kitchen_user()
-        self.menu_card.setVisible(not is_kitchen)
-        self.order_card.setVisible(not is_kitchen)
+        role = self._current_role()
+        can_create = can_create_orders(role)
+        is_kitchen = can_process_kitchen(role)
+        can_close = can_close_orders(role)
+        show_order_list = is_kitchen or can_close
+
+        self.menu_card.setVisible(can_create)
+        self.order_card.setVisible(can_create)
+        self.kitchen_card.setVisible(show_order_list)
         self.kitchen_controls.setVisible(is_kitchen)
-        self.close_order_button.setVisible(not is_kitchen)
-        self.next_status_button.setText("Взять в работу" if is_kitchen else "Следующий статус")
+        self.next_status_button.setVisible(is_kitchen)
+        self.close_order_button.setVisible(can_close)
+
+        if is_kitchen:
+            self.kitchen_card.set_header("Кухонная очередь", "Повар и шеф-повар меняют только статусы приготовления.")
+            self.next_status_button.setText("Взять в работу")
+        elif can_close:
+            self.kitchen_card.set_header("Заказы к оплате", "Кассир закрывает готовые и выданные заказы.")
+        else:
+            self.kitchen_card.set_header("Очередь заказов", "Просмотр заказов текущей смены.")
 
     def update_kitchen_summary(self) -> None:
         counts = {
@@ -307,8 +384,10 @@ class OrdersPage(QWidget):
         self.summary_pills["ready"].set_state(f"Готово: {counts['Готов']}", "success")
 
     def update_kitchen_actions(self) -> None:
-        if not self._is_kitchen_user():
-            self.next_status_button.setEnabled(True)
+        role = self._current_role()
+        if not can_process_kitchen(role):
+            self.next_status_button.setEnabled(False)
+            self.close_order_button.setEnabled(self._selected_queue_index() >= 0 and can_close_orders(role))
             return
 
         queue_index = self._selected_queue_index()
@@ -331,11 +410,14 @@ class OrdersPage(QWidget):
     def _filtered_queue_indices(self) -> list[int]:
         selected_status = self.kitchen_filter.currentText()
         indices = []
+        role = self._current_role()
         for index, item in enumerate(self.store.kitchen_queue):
             status = item["status"]
-            if self._is_kitchen_user() and status not in KITCHEN_ACTIVE_STATUSES:
+            if can_process_kitchen(role) and status not in KITCHEN_ACTIVE_STATUSES:
                 continue
-            if self._is_kitchen_user() and selected_status != "Все активные" and status != selected_status:
+            if can_process_kitchen(role) and selected_status != "Все активные" and status != selected_status:
+                continue
+            if role == "Кассир" and status not in CASHIER_VISIBLE_STATUSES:
                 continue
             indices.append(index)
         return indices
@@ -346,6 +428,6 @@ class OrdersPage(QWidget):
             return -1
         return self.visible_queue_indices[row]
 
-    def _is_kitchen_user(self) -> bool:
+    def _current_role(self) -> str | None:
         user = self.store.current_user or {}
-        return user.get("role") in KITCHEN_ROLES
+        return user.get("role")

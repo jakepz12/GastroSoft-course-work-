@@ -431,6 +431,8 @@ class MySQLBackedStore(DemoStore):
             return False, "Сначала добавь блюда в заказ."
         if not self.mysql_enabled:
             return False, "MySQL не подключен. Заказ не сохранен."
+        if not table_code or table_code not in {table["code"] for table in self.tables}:
+            return False, "В базе нет выбранного активного стола. Заказ не сохранен."
 
         try:
             user_id = self._current_mysql_user_id()
@@ -446,6 +448,14 @@ class MySQLBackedStore(DemoStore):
                 "code",
                 PAYMENT_TO_CODE.get(payment_method, "CASH"),
             )
+            prepared_items = []
+            for item in draft_snapshot:
+                dish_id = self._get_dish_id(item["name"])
+                if dish_id is None:
+                    return False, f"Блюдо не найдено в MySQL: {item['name']}."
+                prepared_items.append((dish_id, item))
+            if not prepared_items:
+                return False, "В заказе нет позиций, связанных с блюдами MySQL."
 
             with self._connect() as connection:
                 with connection.cursor() as cursor:
@@ -462,10 +472,7 @@ class MySQLBackedStore(DemoStore):
                         (table_id, order_status_id, user_id, payment_method_id),
                     )
                     order_id = cursor.lastrowid
-                    for item in draft_snapshot:
-                        dish_id = self._get_dish_id(item["name"])
-                        if dish_id is None:
-                            continue
+                    for dish_id, item in prepared_items:
                         cursor.execute(
                             """
                             INSERT INTO order_item (

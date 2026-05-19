@@ -21,11 +21,9 @@ from .pages.inventory_page import InventoryPage
 from .pages.orders_page import OrdersPage
 from .pages.reservations_page import ReservationsPage
 from .pages.staff_page import StaffPage
+from .role_access import allowed_pages_for_role, default_page_for_role, page_meta_for_role
 from .style_utils import load_style
 from .widgets import apply_button_variant
-
-
-KITCHEN_ROLES = {"Повар", "Шеф-повар"}
 
 
 class GastroSoftWindow(QMainWindow):
@@ -183,7 +181,7 @@ class GastroSoftWindow(QMainWindow):
         self.user_role.setText(user["role"])
         self.show_status(f"Выполнен вход: {user['full_name']} ({user['role']})")
         self._apply_role_navigation()
-        self.navigate("orders" if self._is_kitchen_user() else "dashboard")
+        self.navigate(default_page_for_role(user["role"]))
 
     def logout(self) -> None:
         self.store.current_user = None
@@ -194,16 +192,18 @@ class GastroSoftWindow(QMainWindow):
         self.show_status("Сеанс завершен.")
 
     def navigate(self, page_key: str) -> None:
-        if self._is_kitchen_user() and page_key not in {"auth", "orders"}:
-            page_key = "orders"
+        if page_key != "auth":
+            allowed_pages = self._allowed_pages()
+            if not allowed_pages:
+                page_key = "auth"
+            elif page_key not in allowed_pages:
+                page_key = default_page_for_role(self._current_role())
 
         widget = self.page_widgets[page_key]
         self.stack.setCurrentWidget(widget)
 
         title, subtitle = self.page_meta[page_key]
-        if self._is_kitchen_user() and page_key == "orders":
-            title = "Кухонная очередь"
-            subtitle = "Быстрая обработка заказов для повара и шеф-повара"
+        title, subtitle = page_meta_for_role(self._current_role(), page_key, (title, subtitle))
         self.page_title.setText(title)
         self.page_subtitle.setText(subtitle)
 
@@ -218,15 +218,19 @@ class GastroSoftWindow(QMainWindow):
         if hasattr(widget, "refresh_page"):
             widget.refresh_page()
 
-    def _is_kitchen_user(self) -> bool:
+    def _current_role(self) -> str | None:
         user = self.store.current_user or {}
-        return user.get("role") in KITCHEN_ROLES
+        return user.get("role")
+
+    def _allowed_pages(self) -> list[str]:
+        return allowed_pages_for_role(self._current_role())
 
     def _apply_role_navigation(self) -> None:
-        is_kitchen = self._is_kitchen_user()
+        allowed_pages = set(self._allowed_pages())
         for key, button in self.nav_buttons.items():
-            button.setVisible(not is_kitchen or key == "orders")
-            button.setText("Кухонная очередь" if is_kitchen and key == "orders" else self.nav_titles[key])
+            button.setVisible(key in allowed_pages)
+            title, _ = page_meta_for_role(self._current_role(), key, (self.nav_titles[key], ""))
+            button.setText(title)
 
     def show_status(self, message: str) -> None:
         self.statusBar().showMessage(message, 4500)

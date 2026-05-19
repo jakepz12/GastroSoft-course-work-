@@ -73,6 +73,26 @@ QComboBox:focus {
     border: 1px solid #1F686E;
 }
 
+QComboBox QAbstractItemView {
+    background-color: #FFFFFF;
+    color: #1E293B;
+    border: 1px solid #CBD5E1;
+    selection-color: #1E293B;
+    selection-background-color: #D8F0F1;
+    outline: 0;
+}
+
+QComboBox QAbstractItemView::item {
+    color: #1E293B;
+    min-height: 28px;
+    padding: 6px 10px;
+}
+
+QComboBox QAbstractItemView::item:selected {
+    color: #1E293B;
+    background-color: #D8F0F1;
+}
+
 QPushButton {
     border-radius: 14px;
     padding: 11px 16px;
