@@ -28,6 +28,7 @@ Desktop-прототип ресторанной системы на Python и Py
 
 - `director / 1234`
 - `chef / 1234`
+- `cook / 1234`
 - `waiter / 1234`
 - `cashier / 1234`
 

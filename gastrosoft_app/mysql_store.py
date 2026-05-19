@@ -500,6 +500,23 @@ class MySQLBackedStore(DemoStore):
             current_pos = 0
         next_code = ORDER_STATUS_SEQUENCE[min(current_pos + 1, len(ORDER_STATUS_SEQUENCE) - 1)]
 
+        return self._set_order_status(order, next_code)
+
+    def advance_kitchen_order(self, index: int) -> str:
+        if not self.mysql_enabled or index < 0 or index >= len(self.kitchen_queue):
+            return "MySQL не подключен или заказ не выбран."
+
+        order = self.kitchen_queue[index]
+        current_code = ORDER_STATUS_TO_CODE.get(order["status"], "ACCEPTED")
+        if current_code == "READY":
+            return "Заказ уже отмечен как готовый."
+        if current_code in {"SERVED", "CLOSED"}:
+            return "Заказ уже выдан или закрыт."
+
+        next_code = "READY" if current_code == "PREPARING" else "PREPARING"
+        return self._set_order_status(order, next_code)
+
+    def _set_order_status(self, order: dict, next_code: str) -> str:
         try:
             status_id = self._get_id("order_status", "order_status_id", "code", next_code)
             item_status_code = {
@@ -792,6 +809,7 @@ class MySQLBackedStore(DemoStore):
                 co.order_id,
                 rt.code AS table_code,
                 os.code AS status_code,
+                co.created_at,
                 COALESCE(total.total_amount, 0) AS total_amount,
                 GROUP_CONCAT(d.name ORDER BY d.name SEPARATOR ', ') AS items
             FROM customer_order co
@@ -801,8 +819,8 @@ class MySQLBackedStore(DemoStore):
             LEFT JOIN dish d ON d.dish_id = oi.dish_id
             LEFT JOIN v_order_total total ON total.order_id = co.order_id
             WHERE os.code <> 'CLOSED'
-            GROUP BY co.order_id, rt.code, os.code, total.total_amount
-            ORDER BY co.created_at DESC
+            GROUP BY co.order_id, rt.code, os.code, co.created_at, total.total_amount
+            ORDER BY FIELD(os.code, 'ACCEPTED', 'PREPARING', 'READY', 'SERVED'), co.created_at ASC
             LIMIT 30
             """
         )
@@ -811,6 +829,7 @@ class MySQLBackedStore(DemoStore):
                 "order_id": row["order_id"],
                 "order_no": f"GS-{row['order_id']}",
                 "table": row["table_code"] or "-",
+                "created": row["created_at"].strftime("%H:%M") if row["created_at"] else "-",
                 "items": row["items"] or "Позиции не указаны",
                 "status": _order_status_ru(row["status_code"]),
                 "total": int(row["total_amount"] or 0),

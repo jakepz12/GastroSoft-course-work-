@@ -110,6 +110,9 @@ class DemoStore:
     def advance_order_status(self, index: int) -> str:
         return "База данных не подключена или заказ не выбран."
 
+    def advance_kitchen_order(self, index: int) -> str:
+        return "База данных не подключена или заказ не выбран."
+
     def complete_order(self, index: int) -> str:
         return "База данных не подключена или заказ не выбран."
 

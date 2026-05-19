@@ -25,6 +25,9 @@ from .style_utils import load_style
 from .widgets import apply_button_variant
 
 
+KITCHEN_ROLES = {"Повар", "Шеф-повар"}
+
+
 class GastroSoftWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -32,6 +35,13 @@ class GastroSoftWindow(QMainWindow):
         self.store = MySQLBackedStore(self.project_root)
         self.page_widgets: dict[str, QWidget] = {}
         self.nav_buttons: dict[str, QPushButton] = {}
+        self.nav_titles = {
+            "dashboard": "Главная панель",
+            "staff": "Смены и персонал",
+            "reservations": "Бронирования",
+            "orders": "Заказы и кухня",
+            "inventory": "Склад и отчеты",
+        }
 
         self.page_meta = {
             "auth": ("Авторизация", "Вход в систему и создание учетной записи"),
@@ -77,13 +87,7 @@ class GastroSoftWindow(QMainWindow):
         nav_layout.addSpacing(8)
         self.nav_group = QButtonGroup(self)
         self.nav_group.setExclusive(True)
-        for page_key, button_title in [
-            ("dashboard", "Главная панель"),
-            ("staff", "Смены и персонал"),
-            ("reservations", "Бронирования"),
-            ("orders", "Заказы и кухня"),
-            ("inventory", "Склад и отчеты"),
-        ]:
+        for page_key, button_title in self.nav_titles.items():
             button = QPushButton(button_title)
             button.setObjectName("navButton")
             button.setCheckable(True)
@@ -178,20 +182,28 @@ class GastroSoftWindow(QMainWindow):
         self.user_name.setText(user["full_name"])
         self.user_role.setText(user["role"])
         self.show_status(f"Выполнен вход: {user['full_name']} ({user['role']})")
-        self.navigate("dashboard")
+        self._apply_role_navigation()
+        self.navigate("orders" if self._is_kitchen_user() else "dashboard")
 
     def logout(self) -> None:
         self.store.current_user = None
         self.user_name.setText("Не авторизован")
         self.user_role.setText("Гость")
+        self._apply_role_navigation()
         self.navigate("auth")
         self.show_status("Сеанс завершен.")
 
     def navigate(self, page_key: str) -> None:
+        if self._is_kitchen_user() and page_key not in {"auth", "orders"}:
+            page_key = "orders"
+
         widget = self.page_widgets[page_key]
         self.stack.setCurrentWidget(widget)
 
         title, subtitle = self.page_meta[page_key]
+        if self._is_kitchen_user() and page_key == "orders":
+            title = "Кухонная очередь"
+            subtitle = "Быстрая обработка заказов для повара и шеф-повара"
         self.page_title.setText(title)
         self.page_subtitle.setText(subtitle)
 
@@ -205,6 +217,16 @@ class GastroSoftWindow(QMainWindow):
 
         if hasattr(widget, "refresh_page"):
             widget.refresh_page()
+
+    def _is_kitchen_user(self) -> bool:
+        user = self.store.current_user or {}
+        return user.get("role") in KITCHEN_ROLES
+
+    def _apply_role_navigation(self) -> None:
+        is_kitchen = self._is_kitchen_user()
+        for key, button in self.nav_buttons.items():
+            button.setVisible(not is_kitchen or key == "orders")
+            button.setText("Кухонная очередь" if is_kitchen and key == "orders" else self.nav_titles[key])
 
     def show_status(self, message: str) -> None:
         self.statusBar().showMessage(message, 4500)

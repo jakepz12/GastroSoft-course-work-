@@ -675,6 +675,7 @@ INSERT INTO employee_skill (employee_id, skill_id, skill_level) VALUES
 INSERT INTO app_user (employee_id, login, password_hash, is_active) VALUES
   ((SELECT employee_id FROM employee WHERE email = 'director@gastrosoft.local'), 'director', '03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4', 1),
   ((SELECT employee_id FROM employee WHERE email = 'chef@gastrosoft.local'), 'chef', '03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4', 1),
+  ((SELECT employee_id FROM employee WHERE email = 'cook1@gastrosoft.local'), 'cook', '03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4', 1),
   ((SELECT employee_id FROM employee WHERE email = 'waiter@gastrosoft.local'), 'waiter', '03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4', 1),
   ((SELECT employee_id FROM employee WHERE email = 'cashier@gastrosoft.local'), 'cashier', '03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4', 1);
 
