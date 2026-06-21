@@ -1,0 +1,234 @@
+QWidget#kitchenPage {
+    background-color: #F8FAFC;
+    color: #1E293B;
+    font-family: "Segoe UI";
+}
+
+QLabel#kitchenTitle {
+    font-size: 16pt;
+    font-weight: 700;
+    color: #1E293B;
+}
+
+QLabel#kitchenStatLabel {
+    color: #64748B;
+    font-size: 10pt;
+    padding: 4px 10px;
+}
+
+QLabel#kitchenRushLabel {
+    color: #991B1B;
+    font-weight: 700;
+    font-size: 11pt;
+    padding: 4px 12px;
+    background-color: #FEE2E2;
+    border-radius: 10px;
+}
+
+QFrame#kitchenOrderCard {
+    background-color: transparent;
+    border: none;
+}
+
+QFrame#kitchenCardInner {
+    background-color: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 16px;
+}
+
+QFrame#kitchenCardInner[rush="true"] {
+    border: 2px solid #DC2626;
+    background-color: #FFF5F5;
+}
+
+QLabel#kitchenOrderNo {
+    font-size: 13pt;
+    font-weight: 700;
+    color: #1F686E;
+}
+
+QLabel#kitchenTableLabel {
+    color: #64748B;
+    font-weight: 600;
+}
+
+QLabel#kitchenTimer {
+    font-size: 11pt;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 10px;
+    background-color: #F1F5F9;
+    color: #475569;
+}
+
+QLabel#kitchenTimer[timer_color="fast"] {
+    background-color: #CCFBF1;
+    color: #0F766E;
+}
+
+QLabel#kitchenTimer[timer_color="medium"] {
+    background-color: #FEF3C7;
+    color: #B45309;
+}
+
+QLabel#kitchenTimer[timer_color="slow"] {
+    background-color: #FEE2E2;
+    color: #991B1B;
+}
+
+QLabel#kitchenCookLabel {
+    color: #1F686E;
+    font-weight: 600;
+    font-size: 9pt;
+}
+
+QLabel#kitchenItemDot {
+    font-size: 12pt;
+}
+
+QLabel#kitchenItemDot[dot_color="gray"] {
+    color: #94A3B8;
+}
+
+QLabel#kitchenItemDot[dot_color="blue"] {
+    color: #1F686E;
+}
+
+QLabel#kitchenItemDot[dot_color="green"] {
+    color: #0F766E;
+}
+
+QLabel#kitchenItemName {
+    font-size: 10pt;
+    color: #1E293B;
+}
+
+QLabel#kitchenItemName[done="true"] {
+    color: #94A3B8;
+    text-decoration: line-through;
+}
+
+QLabel#kitchenItemStatus {
+    font-size: 9pt;
+    color: #64748B;
+    padding: 2px 8px;
+    background-color: #F1F5F9;
+    border-radius: 8px;
+}
+
+QLabel#kitchenItemNote {
+    font-size: 9pt;
+    color: #B45309;
+    font-style: italic;
+    padding: 2px 8px;
+    background-color: #FEF3C7;
+    border-radius: 8px;
+}
+
+QLabel#kitchenItemsText {
+    color: #475569;
+    font-size: 10pt;
+}
+
+QLabel#kitchenTotalLabel {
+    font-size: 10pt;
+    font-weight: 600;
+    color: #1E293B;
+}
+
+QFrame#kitchenActionsFrame {
+    background-color: #F8FAFC;
+    border: 1px solid #E2E8F0;
+    border-radius: 10px;
+    margin-top: 4px;
+}
+
+QLabel#kitchenEmpty {
+    font-size: 12pt;
+    color: #94A3B8;
+    padding: 40px;
+}
+
+QComboBox {
+    border-radius: 10px;
+    padding: 8px 14px;
+    font-weight: 600;
+    background-color: #FFFFFF;
+    border: 1px solid #CBD5E1;
+    color: #1E293B;
+}
+
+QPushButton {
+    border-radius: 10px;
+    padding: 8px 16px;
+    font-weight: 600;
+    border: 1px solid #CBD5E1;
+}
+
+QPushButton[variant="primary"] {
+    background-color: #1F686E;
+    color: #FFFFFF;
+    border: 1px solid #1A5559;
+}
+
+QPushButton[variant="secondary"] {
+    background-color: #F1F5F9;
+    color: #1E293B;
+    border: 1px solid #CBD5E1;
+}
+
+QPushButton[variant="warning"] {
+    background-color: #FEF3C7;
+    color: #92400E;
+    border: 1px solid #FCD34D;
+}
+
+QPushButton[variant="danger"] {
+    background-color: #FEE2E2;
+    color: #991B1B;
+    border: 1px solid #FCA5A5;
+}
+
+QPushButton[variant="success"] {
+    background-color: #D1FAE5;
+    color: #065F46;
+    border: 1px solid #6EE7B7;
+}
+
+QPushButton[variant="ghost"] {
+    background-color: transparent;
+    color: #1F686E;
+    border: 1px solid #1F686E;
+}
+
+QLabel#statusPill {
+    border-radius: 12px;
+    padding: 6px 12px;
+    font-weight: 600;
+    font-size: 9pt;
+}
+
+QLabel#statusPill[tone="info"] {
+    color: #1F686E;
+    background-color: #D8F0F1;
+}
+
+QLabel#statusPill[tone="success"] {
+    color: #0F766E;
+    background-color: #CCFBF1;
+}
+
+QLabel#statusPill[tone="warning"] {
+    color: #B45309;
+    background-color: #FEF3C7;
+}
+
+QLabel#statusPill[tone="danger"] {
+    color: #991B1B;
+    background-color: #FEE2E2;
+}
+
+QLabel#statusPill[tone="muted"] {
+    color: #475569;
+    background-color: #E2E8F0;
+}

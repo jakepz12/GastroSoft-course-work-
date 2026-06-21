@@ -20,7 +20,6 @@ ROLE_CODE_TO_RU = {
     "ACCOUNTANT": "Бухгалтер",
     "WAITER": "Официант",
     "COOK": "Повар",
-    "CASHIER": "Кассир",
 }
 
 RU_ROLE_TO_CODE = {value: key for key, value in ROLE_CODE_TO_RU.items()}
@@ -68,6 +67,30 @@ SHIFT_STATUS_TO_RU = {
 }
 
 ORDER_STATUS_SEQUENCE = ["ACCEPTED", "PREPARING", "READY", "SERVED"]
+
+ITEM_STATUS_TO_CODE = {
+    "В очереди": "QUEUED",
+    "Готовится": "COOKING",
+    "Готово": "READY",
+    "Подано": "SERVED",
+    "Отменено": "CANCELLED",
+}
+
+CODE_TO_ITEM_STATUS = {code: ru for ru, code in ITEM_STATUS_TO_CODE.items()}
+
+PRIORITY_TO_RU = {"normal": "Обычный", "rush": "Срочно"}
+RU_TO_PRIORITY = {ru: code for code, ru in PRIORITY_TO_RU.items()}
+
+KITCHEN_LOG_ACTIONS = {
+    "CREATED": "Создан",
+    "ACCEPTED": "Принят",
+    "STARTED": "Начато приготовление",
+    "ITEM_READY": "Позиция готова",
+    "ORDER_READY": "Заказ готов",
+    "COOK_ASSIGNED": "Назначен повар",
+    "PRIORITY_SET": "Изменён приоритет",
+    "CANCELLED": "Отменён",
+}
 
 
 class MySQLBackedStore(DemoStore):
@@ -474,6 +497,7 @@ class MySQLBackedStore(DemoStore):
                     )
                     order_id = cursor.lastrowid
                     for dish_id, item in prepared_items:
+                        item_note = item.get("note", "")
                         cursor.execute(
                             """
                             INSERT INTO order_item (
@@ -481,11 +505,12 @@ class MySQLBackedStore(DemoStore):
                                 dish_id,
                                 order_item_status_id,
                                 quantity,
-                                unit_price
+                                unit_price,
+                                note
                             )
-                            VALUES (%s, %s, %s, %s, %s)
+                            VALUES (%s, %s, %s, %s, %s, %s)
                             """,
-                            (order_id, dish_id, item_status_id, item["qty"], item["price"]),
+                            (order_id, dish_id, item_status_id, item["qty"], item["price"], item_note or None),
                         )
                 connection.commit()
             self.clear_draft()
@@ -541,7 +566,13 @@ class MySQLBackedStore(DemoStore):
                         (status_id, order["order_id"]),
                     )
                     cursor.execute(
-                        "UPDATE order_item SET order_item_status_id = %s WHERE order_id = %s",
+                        """UPDATE order_item
+                           SET order_item_status_id = %s
+                           WHERE order_id = %s
+                             AND order_item_status_id NOT IN (
+                               SELECT order_item_status_id FROM order_item_status
+                               WHERE code IN ('READY', 'SERVED', 'CANCELLED')
+                             )""",
                         (item_status_id, order["order_id"]),
                     )
                 connection.commit()
@@ -613,6 +644,437 @@ class MySQLBackedStore(DemoStore):
             return f"Ошибка записи складской операции в MySQL: {exc}"
 
         return "Операция по складу сохранена в MySQL."
+
+    # =========================================================
+    # Kitchen module methods
+    # =========================================================
+
+    def get_order_items(self, order_id: int) -> list[dict]:
+        if not self.mysql_enabled:
+            return []
+        rows = self._fetch_all(
+            """
+            SELECT
+                oi.order_item_id,
+                oi.order_id,
+                d.name AS dish_name,
+                oi.quantity,
+                oi.unit_price,
+                oi.note,
+                ois.code AS status_code,
+                oi.assigned_cook_id,
+                oi.started_at,
+                oi.ready_at,
+                CONCAT(e.last_name, ' ', e.first_name) AS cook_name
+            FROM order_item oi
+            JOIN dish d ON d.dish_id = oi.dish_id
+            JOIN order_item_status ois ON ois.order_item_status_id = oi.order_item_status_id
+            LEFT JOIN employee e ON e.employee_id = oi.assigned_cook_id
+            WHERE oi.order_id = %s
+            ORDER BY oi.order_item_id
+            """,
+            (order_id,),
+        )
+        return [
+            {
+                "item_id": row["order_item_id"],
+                "order_id": row["order_id"],
+                "dish": row["dish_name"],
+                "quantity": row["quantity"],
+                "price": int(row["unit_price"]),
+                "note": row["note"] or "",
+                "status": CODE_TO_ITEM_STATUS.get(row["status_code"], row["status_code"]),
+                "status_code": row["status_code"],
+                "cook_id": row["assigned_cook_id"],
+                "cook_name": row["cook_name"] or "",
+                "started_at": row["started_at"],
+                "ready_at": row["ready_at"],
+            }
+            for row in rows
+        ]
+
+    def update_item_status(self, order_item_id: int, status_code: str) -> str:
+        if not self.mysql_enabled:
+            return "MySQL не подключен."
+        try:
+            status_id = self._get_id("order_item_status", "order_item_status_id", "code", status_code)
+            now_fields = ""
+            now_values: list = []
+            if status_code == "COOKING":
+                now_fields = ", started_at = COALESCE(started_at, NOW())"
+            elif status_code == "READY":
+                now_fields = ", ready_at = COALESCE(ready_at, NOW())"
+
+            with self._connect() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        f"UPDATE order_item SET order_item_status_id = %s{now_fields} WHERE order_item_id = %s",
+                        (status_id, order_item_id),
+                    )
+
+                    if status_code == "COOKING":
+                        cursor.execute(
+                            """UPDATE customer_order co
+                               JOIN order_item oi ON oi.order_id = co.order_id
+                               SET co.started_at = COALESCE(co.started_at, NOW())
+                               WHERE oi.order_item_id = %s""",
+                            (order_item_id,),
+                        )
+
+                    cursor.execute(
+                        "SELECT order_id FROM order_item WHERE order_item_id = %s",
+                        (order_item_id,),
+                    )
+                    order_row = cursor.fetchone()
+                    if order_row:
+                        self._update_order_status_from_items(connection, order_row[0])
+
+                connection.commit()
+            self.reload_from_mysql()
+        except Error as exc:
+            return f"Ошибка обновления статуса позиции: {exc}"
+        return "Статус позиции обновлён."
+
+    def _update_order_status_from_items(self, connection, order_id: int) -> None:
+        with connection.cursor(dictionary=True) as cursor:
+            cursor.execute(
+                """SELECT ois.code
+                   FROM order_item oi
+                   JOIN order_item_status ois ON ois.order_item_status_id = oi.order_item_status_id
+                   WHERE oi.order_id = %s""",
+                (order_id,),
+            )
+            statuses = {row["code"] for row in cursor.fetchall()}
+
+            if statuses == {"SERVED"} or statuses == {"READY"}:
+                new_order_code = "READY"
+            elif "COOKING" in statuses:
+                new_order_code = "PREPARING"
+            elif statuses == {"QUEUED"}:
+                new_order_code = "ACCEPTED"
+            else:
+                return
+
+            new_status_id = self._get_id("order_status", "order_status_id", "code", new_order_code)
+            cursor.execute(
+                "UPDATE customer_order SET order_status_id = %s WHERE order_id = %s",
+                (new_status_id, order_id),
+            )
+
+    def assign_cook_to_order(self, order_id: int, cook_employee_id: int) -> str:
+        if not self.mysql_enabled:
+            return "MySQL не подключен."
+        try:
+            with self._connect() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        "UPDATE customer_order SET assigned_cook_id = %s WHERE order_id = %s",
+                        (cook_employee_id, order_id),
+                    )
+                    cursor.execute(
+                        """UPDATE order_item SET assigned_cook_id = %s
+                           WHERE order_id = %s AND assigned_cook_id IS NULL""",
+                        (cook_employee_id, order_id),
+                    )
+                connection.commit()
+            self.reload_from_mysql()
+        except Error as exc:
+            return f"Ошибка назначения повара: {exc}"
+        return "Повар назначен на заказ."
+
+    def assign_cook_to_item(self, order_item_id: int, cook_employee_id: int) -> str:
+        if not self.mysql_enabled:
+            return "MySQL не подключен."
+        try:
+            with self._connect() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        "UPDATE order_item SET assigned_cook_id = %s WHERE order_item_id = %s",
+                        (cook_employee_id, order_item_id),
+                    )
+                connection.commit()
+            self.reload_from_mysql()
+        except Error as exc:
+            return f"Ошибка назначения повара на позицию: {exc}"
+        return "Повар назначен на позицию."
+
+    def set_order_priority(self, order_id: int, priority: str) -> str:
+        if not self.mysql_enabled:
+            return "MySQL не подключен."
+        try:
+            with self._connect() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        "UPDATE customer_order SET priority = %s WHERE order_id = %s",
+                        (priority, order_id),
+                    )
+                connection.commit()
+            self.reload_from_mysql()
+        except Error as exc:
+            return f"Ошибка изменения приоритета: {exc}"
+        return f"Приоритет заказа: {PRIORITY_TO_RU.get(priority, priority)}."
+
+    def start_order(self, order_id: int) -> str:
+        if not self.mysql_enabled:
+            return "MySQL не подключен."
+        try:
+            with self._connect() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """UPDATE customer_order
+                           SET started_at = COALESCE(started_at, NOW())
+                           WHERE order_id = %s""",
+                        (order_id,),
+                    )
+                    cursor.execute(
+                        """UPDATE order_item
+                           SET started_at = COALESCE(started_at, NOW()),
+                               order_item_status_id = (SELECT order_item_status_id FROM order_item_status WHERE code = 'COOKING')
+                           WHERE order_id = %s AND order_item_status_id = (SELECT order_item_status_id FROM order_item_status WHERE code = 'QUEUED')""",
+                        (order_id,),
+                    )
+                connection.commit()
+            self.reload_from_mysql()
+        except Error as exc:
+            return f"Ошибка начала приготовления: {exc}"
+        return "Приготовление начато."
+
+    def mark_item_ready(self, order_item_id: int) -> str:
+        if not self.mysql_enabled:
+            return "MySQL не подключен."
+        try:
+            ready_status_id = self._get_id("order_item_status", "order_item_status_id", "code", "READY")
+            with self._connect() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """UPDATE order_item
+                           SET order_item_status_id = %s, ready_at = COALESCE(ready_at, NOW())
+                           WHERE order_item_id = %s""",
+                        (ready_status_id, order_item_id),
+                    )
+                    cursor.execute("SELECT order_id FROM order_item WHERE order_item_id = %s", (order_item_id,))
+                    row = cursor.fetchone()
+                    if row:
+                        self._update_order_status_from_items(connection, row[0])
+                connection.commit()
+            self.reload_from_mysql()
+        except Error as exc:
+            return f"Ошибка отметки готовности: {exc}"
+        return "Позиция отмечена как готовая."
+
+    def add_order_item_note(self, order_item_id: int, note: str) -> str:
+        if not self.mysql_enabled:
+            return "MySQL не подключен."
+        try:
+            with self._connect() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        "UPDATE order_item SET note = %s WHERE order_item_id = %s",
+                        (note, order_item_id),
+                    )
+                connection.commit()
+            self.reload_from_mysql()
+        except Error as exc:
+            return f"Ошибка добавления примечания: {exc}"
+        return "Примечание сохранено."
+
+    def cancel_order_item(self, order_item_id: int) -> str:
+        if not self.mysql_enabled:
+            return "MySQL не подключен."
+        try:
+            cancelled_id = self._get_id("order_item_status", "order_item_status_id", "code", "CANCELLED")
+            with self._connect() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        "UPDATE order_item SET order_item_status_id = %s WHERE order_item_id = %s",
+                        (cancelled_id, order_item_id),
+                    )
+                    cursor.execute("SELECT order_id FROM order_item WHERE order_item_id = %s", (order_item_id,))
+                    row = cursor.fetchone()
+                    if row:
+                        self._update_order_status_from_items(connection, row[0])
+                connection.commit()
+            self.reload_from_mysql()
+        except Error as exc:
+            return f"Ошибка отмены позиции: {exc}"
+        return "Позиция отменена."
+
+    def cancel_order(self, order_id: int) -> str:
+        if not self.mysql_enabled:
+            return "MySQL не подключен."
+        try:
+            cancelled_order = self._get_id("order_status", "order_status_id", "code", "CANCELLED")
+            cancelled_item = self._get_id("order_item_status", "order_item_status_id", "code", "CANCELLED")
+            with self._connect() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        "UPDATE customer_order SET order_status_id = %s WHERE order_id = %s",
+                        (cancelled_order, order_id),
+                    )
+                    cursor.execute(
+                        """UPDATE order_item
+                           SET order_item_status_id = %s
+                           WHERE order_id = %s
+                             AND order_item_status_id NOT IN (
+                               SELECT order_item_status_id FROM order_item_status
+                               WHERE code IN ('READY', 'SERVED')
+                             )""",
+                        (cancelled_item, order_id),
+                    )
+                connection.commit()
+            self.reload_from_mysql()
+        except Error as exc:
+            return f"Ошибка отмены заказа: {exc}"
+        return f"Заказ GS-{order_id} отменён."
+
+    def get_kitchen_stats(self) -> dict:
+        if not self.mysql_enabled:
+            return {"avg_prep_time": 0, "in_progress": 0, "completed_today": 0, "rush_active": 0}
+        try:
+            avg_row = self._fetch_one(
+                """SELECT AVG(TIMESTAMPDIFF(MINUTE, started_at, ready_at)) AS avg_min
+                   FROM order_item
+                   WHERE started_at IS NOT NULL AND ready_at IS NOT NULL
+                     AND DATE(ready_at) = CURRENT_DATE()"""
+            )
+            progress_row = self._fetch_one(
+                """SELECT COUNT(*) AS cnt FROM customer_order co
+                   JOIN order_status os ON os.order_status_id = co.order_status_id
+                   WHERE os.code IN ('ACCEPTED', 'PREPARING')"""
+            )
+            completed_row = self._fetch_one(
+                """SELECT COUNT(*) AS cnt FROM customer_order co
+                   JOIN order_status os ON os.order_status_id = co.order_status_id
+                   WHERE os.code IN ('READY', 'SERVED', 'CLOSED')
+                     AND DATE(co.created_at) = CURRENT_DATE()"""
+            )
+            rush_row = self._fetch_one(
+                """SELECT COUNT(*) AS cnt FROM customer_order
+                   WHERE priority = 'rush'
+                     AND order_status_id IN (SELECT order_status_id FROM order_status WHERE code IN ('ACCEPTED', 'PREPARING'))"""
+            )
+            return {
+                "avg_prep_time": int(avg_row["avg_min"] or 0) if avg_row else 0,
+                "in_progress": int(progress_row["cnt"] or 0) if progress_row else 0,
+                "completed_today": int(completed_row["cnt"] or 0) if completed_row else 0,
+                "rush_active": int(rush_row["cnt"] or 0) if rush_row else 0,
+            }
+        except Error:
+            return {"avg_prep_time": 0, "in_progress": 0, "completed_today": 0, "rush_active": 0}
+
+    def get_active_orders_for_kitchen(self) -> list[dict]:
+        if not self.mysql_enabled:
+            return self.kitchen_queue
+        rows = self._fetch_all(
+            """
+            SELECT
+                co.order_id,
+                rt.code AS table_code,
+                os.code AS status_code,
+                co.created_at,
+                co.started_at,
+                co.priority,
+                COALESCE(total.total_amount, 0) AS total_amount,
+                CONCAT(creator_e.last_name, ' ', creator_e.first_name) AS created_by,
+                CONCAT(cook_e.last_name, ' ', cook_e.first_name) AS cook_name,
+                co.assigned_cook_id
+            FROM customer_order co
+            LEFT JOIN restaurant_table rt ON rt.table_id = co.table_id
+            JOIN order_status os ON os.order_status_id = co.order_status_id
+            LEFT JOIN v_order_total total ON total.order_id = co.order_id
+            LEFT JOIN app_user creator_u ON creator_u.user_id = co.created_by_user_id
+            LEFT JOIN employee creator_e ON creator_e.employee_id = creator_u.employee_id
+            LEFT JOIN employee cook_e ON cook_e.employee_id = co.assigned_cook_id
+            WHERE os.code NOT IN ('CLOSED', 'CANCELLED')
+            ORDER BY FIELD(co.priority, 'rush', 'normal'), co.created_at ASC
+            """
+        )
+        result = []
+        for row in rows:
+            items = self.get_order_items(row["order_id"])
+            result.append({
+                "order_id": row["order_id"],
+                "order_no": f"GS-{row['order_id']}",
+                "table": row["table_code"] or "-",
+                "created": row["created_at"].strftime("%H:%M") if row["created_at"] else "-",
+                "started_at": row["started_at"],
+                "status": _order_status_ru(row["status_code"]),
+                "status_code": row["status_code"],
+                "total": int(row["total_amount"] or 0),
+                "priority": row["priority"],
+                "created_by": row["created_by"] or "",
+                "cook_name": row["cook_name"] or "",
+                "items": items,
+            })
+        return result
+
+    def get_order_history(self, limit: int = 50) -> list[dict]:
+        if not self.mysql_enabled:
+            return []
+        rows = self._fetch_all(
+            """
+            SELECT
+                co.order_id,
+                rt.code AS table_code,
+                os.code AS status_code,
+                co.created_at,
+                co.closed_at,
+                co.priority,
+                COALESCE(total.total_amount, 0) AS total_amount,
+                CONCAT(creator_e.last_name, ' ', creator_e.first_name) AS created_by
+            FROM customer_order co
+            LEFT JOIN restaurant_table rt ON rt.table_id = co.table_id
+            JOIN order_status os ON os.order_status_id = co.order_status_id
+            LEFT JOIN v_order_total total ON total.order_id = co.order_id
+            LEFT JOIN app_user creator_u ON creator_u.user_id = co.created_by_user_id
+            LEFT JOIN employee creator_e ON creator_e.employee_id = creator_u.employee_id
+            ORDER BY co.created_at DESC
+            LIMIT %s
+            """,
+            (limit,),
+        )
+        return [
+            {
+                "order_id": row["order_id"],
+                "order_no": f"GS-{row['order_id']}",
+                "table": row["table_code"] or "-",
+                "created": row["created_at"].strftime("%d.%m %H:%M") if row["created_at"] else "-",
+                "closed": row["closed_at"].strftime("%d.%m %H:%M") if row["closed_at"] else "-",
+                "status": _order_status_ru(row["status_code"]),
+                "total": int(row["total_amount"] or 0),
+                "priority": row["priority"],
+                "created_by": row["created_by"] or "",
+            }
+            for row in rows
+        ]
+
+    def log_kitchen_action(self, order_id: int, action: str, note: str = "") -> None:
+        if not self.mysql_enabled:
+            return
+        try:
+            user_id = self._current_mysql_user_id()
+            with self._connect() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """INSERT INTO kitchen_log (order_id, action, performed_by_user_id, note)
+                           VALUES (%s, %s, %s, %s)""",
+                        (order_id, action, user_id, note),
+                    )
+                connection.commit()
+        except Error:
+            pass
+
+    def get_cooks(self) -> list[dict]:
+        if not self.mysql_enabled:
+            return []
+        rows = self._fetch_all(
+            """SELECT e.employee_id, CONCAT(e.last_name, ' ', e.first_name) AS name
+               FROM employee e
+               JOIN employee_role er ON er.role_id = e.role_id
+               WHERE er.code IN ('CHEF', 'COOK') AND e.is_active = 1
+               ORDER BY e.last_name"""
+        )
+        return [{"id": row["employee_id"], "name": row["name"]} for row in rows]
 
     def _load_roles(self) -> None:
         rows = self._fetch_all("SELECT code FROM employee_role ORDER BY role_id")
@@ -840,18 +1302,25 @@ class MySQLBackedStore(DemoStore):
                 rt.code AS table_code,
                 os.code AS status_code,
                 co.created_at,
+                co.started_at,
+                co.priority,
                 COALESCE(total.total_amount, 0) AS total_amount,
-                GROUP_CONCAT(d.name ORDER BY d.name SEPARATOR ', ') AS items
+                GROUP_CONCAT(d.name ORDER BY d.name SEPARATOR ', ') AS items,
+                CONCAT(cook_e.last_name, ' ', cook_e.first_name) AS cook_name
             FROM customer_order co
             LEFT JOIN restaurant_table rt ON rt.table_id = co.table_id
             JOIN order_status os ON os.order_status_id = co.order_status_id
             LEFT JOIN order_item oi ON oi.order_id = co.order_id
             LEFT JOIN dish d ON d.dish_id = oi.dish_id
             LEFT JOIN v_order_total total ON total.order_id = co.order_id
-            WHERE os.code <> 'CLOSED'
-            GROUP BY co.order_id, rt.code, os.code, co.created_at, total.total_amount
-            ORDER BY FIELD(os.code, 'ACCEPTED', 'PREPARING', 'READY', 'SERVED'), co.created_at ASC
-            LIMIT 30
+            LEFT JOIN employee cook_e ON cook_e.employee_id = co.assigned_cook_id
+            WHERE os.code NOT IN ('CLOSED', 'CANCELLED')
+            GROUP BY co.order_id, rt.code, os.code, co.created_at, co.started_at,
+                     co.priority, total.total_amount, cook_e.last_name, cook_e.first_name
+            ORDER BY FIELD(co.priority, 'rush', 'normal'),
+                     FIELD(os.code, 'ACCEPTED', 'PREPARING', 'READY', 'SERVED'),
+                     co.created_at ASC
+            LIMIT 100
             """
         )
         self.kitchen_queue = [
@@ -860,9 +1329,13 @@ class MySQLBackedStore(DemoStore):
                 "order_no": f"GS-{row['order_id']}",
                 "table": row["table_code"] or "-",
                 "created": row["created_at"].strftime("%H:%M") if row["created_at"] else "-",
+                "started_at": row["started_at"],
                 "items": row["items"] or "Позиции не указаны",
                 "status": _order_status_ru(row["status_code"]),
+                "status_code": row["status_code"],
                 "total": int(row["total_amount"] or 0),
+                "priority": row["priority"],
+                "cook_name": row["cook_name"] or "",
             }
             for row in rows
         ]

@@ -1,20 +1,20 @@
 KITCHEN_ROLES = {"Повар", "Шеф-повар"}
 ORDER_CREATOR_ROLES = {"Официант", "Менеджер зала", "Администратор системы", "Директор"}
-CASHIER_ROLES = {"Кассир"}
+CASHIER_ROLES = {"Официант"}
 ADMIN_ROLES = {"Администратор системы", "Директор"}
 RESERVATION_ROLES = {"Менеджер зала", "Администратор системы", "Директор"}
 INVENTORY_ROLES = {"Бухгалтер", "Администратор системы", "Директор"}
 STAFF_ROLES = {"Администратор системы", "Директор"}
+CHEF_ROLES = {"Шеф-повар"}
 
 
 ROLE_ALLOWED_PAGES = {
-    "Администратор системы": ["dashboard", "staff", "reservations", "orders", "inventory"],
-    "Директор": ["dashboard", "staff", "reservations", "orders", "inventory"],
+    "Администратор системы": ["dashboard", "staff", "reservations", "orders", "inventory", "kitchen", "reports"],
+    "Директор": ["dashboard", "staff", "reservations", "orders", "inventory", "kitchen", "reports"],
     "Менеджер зала": ["reservations", "orders"],
     "Официант": ["orders"],
-    "Кассир": ["orders"],
-    "Шеф-повар": ["orders"],
-    "Повар": ["orders"],
+    "Шеф-повар": ["kitchen", "orders", "reports"],
+    "Повар": ["kitchen"],
     "Бухгалтер": ["inventory"],
 }
 
@@ -23,19 +23,19 @@ ROLE_DEFAULT_PAGE = {
     "Директор": "dashboard",
     "Менеджер зала": "reservations",
     "Официант": "orders",
-    "Кассир": "orders",
-    "Шеф-повар": "orders",
-    "Повар": "orders",
+    "Шеф-повар": "kitchen",
+    "Повар": "kitchen",
     "Бухгалтер": "inventory",
 }
 
 
 ROLE_PAGE_META = {
-    ("Официант", "orders"): ("Оформление заказа", "Выбор блюд, столика и передача заказа на кухню"),
+    ("Официант", "orders"): ("Оформление заказов", "Создание, контроль и закрытие заказов"),
     ("Менеджер зала", "orders"): ("Заказы зала", "Контроль оформления заказов и передачи на кухню"),
-    ("Кассир", "orders"): ("Закрытие заказов", "Просмотр готовых заказов и закрытие оплаты"),
-    ("Шеф-повар", "orders"): ("Кухонная очередь", "Контроль активных заказов кухни"),
-    ("Повар", "orders"): ("Кухонная очередь", "Быстрая обработка заказов кухни"),
+    ("Шеф-повар", "orders"): ("Просмотр заказов", "Просмотр заказов текущей смены"),
+    ("Шеф-повар", "kitchen"): ("Кухонная панель", "Управление очередью кухни и распределение заказов"),
+    ("Шеф-повар", "reports"): ("Отчёты кухни", "Статистика, история и текстовые отчёты"),
+    ("Повар", "kitchen"): ("Кухонная очередь", "Приготовление заказов"),
     ("Бухгалтер", "inventory"): ("Склад и отчеты", "Складские операции и отчетность"),
 }
 
@@ -74,3 +74,15 @@ def can_manage_reservations(role: str | None) -> bool:
 
 def can_manage_staff(role: str | None) -> bool:
     return role in STAFF_ROLES
+
+
+def can_manage_kitchen(role: str | None) -> bool:
+    return role in KITCHEN_ROLES
+
+
+def is_chef_role(role: str | None) -> bool:
+    return role in CHEF_ROLES
+
+
+def can_cancel_orders(role: str | None) -> bool:
+    return role in ORDER_CREATOR_ROLES or role in KITCHEN_ROLES or role in ADMIN_ROLES

@@ -50,6 +50,18 @@ class DashboardPage(QWidget):
             metrics_layout.addWidget(card, index // 2, index % 2)
         root_layout.addLayout(metrics_layout)
 
+        kitchen_metrics = QHBoxLayout()
+        kitchen_metrics.setSpacing(16)
+        for key, title, note in [
+            ("kitchen_avg", "Среднее время", "Приготовления блюда за сегодня"),
+            ("kitchen_active", "На кухне", "Заказов в работе сейчас"),
+        ]:
+            card = MetricCard(title, "0", note)
+            self.metric_cards[key] = card
+            kitchen_metrics.addWidget(card)
+        kitchen_metrics.addStretch(1)
+        root_layout.addLayout(kitchen_metrics)
+
         charts_layout = QHBoxLayout()
         charts_layout.setSpacing(18)
 
@@ -79,13 +91,14 @@ class DashboardPage(QWidget):
                 ("Открыть смены", "staff", "primary"),
                 ("Открыть брони", "reservations", "secondary"),
                 ("Открыть заказы", "orders", "warning"),
+                ("Открыть кухню", "kitchen", "danger"),
                 ("Открыть склад", "inventory", "ghost"),
             ]
         ):
             button = QPushButton(title)
             apply_button_variant(button, variant)
             button.clicked.connect(lambda checked=False, key=page_key: self.navigate_requested.emit(key))
-            action_grid.addWidget(button, index // 2, index % 2)
+            action_grid.addWidget(button, index // 3, index % 3)
         actions_card.content_layout.addLayout(action_grid)
 
         refresh_button = QPushButton("Обновить показатели")
@@ -116,6 +129,17 @@ class DashboardPage(QWidget):
         self.metric_cards["orders"].set_value(metrics["orders"], "Заказы по всем активным зонам")
         self.metric_cards["reservations"].set_value(metrics["reservations"], "Ожидаемые и подтвержденные гости")
         self.metric_cards["low_stock"].set_value(metrics["low_stock"], "Требуют внимания менеджера или кухни")
+
+        if hasattr(self.store, "get_kitchen_stats"):
+            k_stats = self.store.get_kitchen_stats()
+            avg_time = k_stats.get("avg_prep_time", 0)
+            in_progress = k_stats.get("in_progress", 0)
+            self.metric_cards["kitchen_avg"].set_value(f"{avg_time} мин", "Среднее время приготовления")
+            self.metric_cards["kitchen_active"].set_value(str(in_progress), "Заказов в работе на кухне")
+        else:
+            self.metric_cards["kitchen_avg"].set_value("--", "Нет данных о кухне")
+            self.metric_cards["kitchen_active"].set_value("--", "Нет данных о кухне")
+
         self.draft_status.set_state(f"Черновик заказа: {metrics['draft_total']}", "info")
 
         self.alerts_list.clear()

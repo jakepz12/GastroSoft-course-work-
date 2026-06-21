@@ -1,6 +1,3 @@
--- GastroSoft course project
--- MySQL 8+ / MariaDB-compatible schema
--- Goal: restaurant operations + staff planning in 3NF
 
 DROP DATABASE IF EXISTS gastrosoft_course;
 CREATE DATABASE gastrosoft_course
@@ -9,9 +6,6 @@ CREATE DATABASE gastrosoft_course
 
 USE gastrosoft_course;
 
--- =========================================================
--- Reference tables
--- =========================================================
 
 CREATE TABLE employee_role (
   role_id INT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -117,9 +111,6 @@ CREATE TABLE measurement_unit (
   UNIQUE KEY uq_measurement_unit_name (name)
 ) ENGINE=InnoDB;
 
--- =========================================================
--- Employees and access
--- =========================================================
 
 CREATE TABLE employee (
   employee_id INT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -180,9 +171,6 @@ CREATE TABLE employee_shift_preference (
     FOREIGN KEY (shift_type_id) REFERENCES shift_type (shift_type_id)
 ) ENGINE=InnoDB;
 
--- =========================================================
--- Hall, guests, reservations, forecasts
--- =========================================================
 
 CREATE TABLE restaurant_table (
   table_id INT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -263,9 +251,6 @@ CREATE TABLE staffing_requirement (
     FOREIGN KEY (role_id) REFERENCES employee_role (role_id)
 ) ENGINE=InnoDB;
 
--- =========================================================
--- Shift planning and time tracking
--- =========================================================
 
 CREATE TABLE work_shift (
   shift_id INT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -334,9 +319,6 @@ CREATE TABLE shift_swap_request (
     FOREIGN KEY (decided_by_user_id) REFERENCES app_user (user_id)
 ) ENGINE=InnoDB;
 
--- =========================================================
--- Menu, modifiers, recipes
--- =========================================================
 
 CREATE TABLE menu_category (
   category_id INT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -427,9 +409,6 @@ CREATE TABLE recipe_item (
     FOREIGN KEY (ingredient_id) REFERENCES ingredient (ingredient_id)
 ) ENGINE=InnoDB;
 
--- =========================================================
--- Orders and stock movement
--- =========================================================
 
 CREATE TABLE customer_order (
   order_id INT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -437,8 +416,11 @@ CREATE TABLE customer_order (
   reservation_id INT UNSIGNED DEFAULT NULL,
   order_status_id INT UNSIGNED NOT NULL,
   created_by_user_id INT UNSIGNED NOT NULL,
+  assigned_cook_id INT UNSIGNED DEFAULT NULL,
+  priority ENUM('normal','rush') NOT NULL DEFAULT 'normal',
   payment_method_id INT UNSIGNED DEFAULT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  started_at DATETIME DEFAULT NULL,
   closed_at DATETIME DEFAULT NULL,
   note VARCHAR(255) DEFAULT NULL,
   PRIMARY KEY (order_id),
@@ -446,6 +428,7 @@ CREATE TABLE customer_order (
   KEY idx_customer_order_reservation (reservation_id),
   KEY idx_customer_order_status (order_status_id),
   KEY idx_customer_order_created_by (created_by_user_id),
+  KEY idx_customer_order_cook (assigned_cook_id),
   KEY idx_customer_order_payment_method (payment_method_id),
   KEY idx_customer_order_created_at (created_at),
   CONSTRAINT fk_customer_order_table
@@ -456,6 +439,8 @@ CREATE TABLE customer_order (
     FOREIGN KEY (order_status_id) REFERENCES order_status (order_status_id),
   CONSTRAINT fk_customer_order_created_by
     FOREIGN KEY (created_by_user_id) REFERENCES app_user (user_id),
+  CONSTRAINT fk_customer_order_cook
+    FOREIGN KEY (assigned_cook_id) REFERENCES employee (employee_id),
   CONSTRAINT fk_customer_order_payment_method
     FOREIGN KEY (payment_method_id) REFERENCES payment_method (payment_method_id)
 ) ENGINE=InnoDB;
@@ -467,18 +452,24 @@ CREATE TABLE order_item (
   order_item_status_id INT UNSIGNED NOT NULL,
   quantity INT UNSIGNED NOT NULL DEFAULT 1,
   unit_price DECIMAL(10,2) NOT NULL,
+  assigned_cook_id INT UNSIGNED DEFAULT NULL,
+  started_at DATETIME DEFAULT NULL,
+  ready_at DATETIME DEFAULT NULL,
   note VARCHAR(255) DEFAULT NULL,
   PRIMARY KEY (order_item_id),
   KEY idx_order_item_order (order_id),
   KEY idx_order_item_dish (dish_id),
   KEY idx_order_item_status (order_item_status_id),
+  KEY idx_order_item_cook (assigned_cook_id),
   CONSTRAINT fk_order_item_order
     FOREIGN KEY (order_id) REFERENCES customer_order (order_id)
       ON DELETE CASCADE,
   CONSTRAINT fk_order_item_dish
     FOREIGN KEY (dish_id) REFERENCES dish (dish_id),
   CONSTRAINT fk_order_item_status
-    FOREIGN KEY (order_item_status_id) REFERENCES order_item_status (order_item_status_id)
+    FOREIGN KEY (order_item_status_id) REFERENCES order_item_status (order_item_status_id),
+  CONSTRAINT fk_order_item_cook
+    FOREIGN KEY (assigned_cook_id) REFERENCES employee (employee_id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE order_item_modifier (
@@ -519,9 +510,26 @@ CREATE TABLE inventory_operation (
     FOREIGN KEY (related_order_item_id) REFERENCES order_item (order_item_id)
 ) ENGINE=InnoDB;
 
--- =========================================================
--- Useful analytical views
--- =========================================================
+CREATE TABLE kitchen_log (
+  log_id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  order_id INT UNSIGNED NOT NULL,
+  order_item_id INT UNSIGNED DEFAULT NULL,
+  action VARCHAR(50) NOT NULL,
+  performed_by_user_id INT UNSIGNED DEFAULT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  note VARCHAR(255) DEFAULT NULL,
+  PRIMARY KEY (log_id),
+  KEY idx_kitchen_log_order (order_id),
+  KEY idx_kitchen_log_item (order_item_id),
+  KEY idx_kitchen_log_created (created_at),
+  CONSTRAINT fk_kitchen_log_order
+    FOREIGN KEY (order_id) REFERENCES customer_order (order_id),
+  CONSTRAINT fk_kitchen_log_item
+    FOREIGN KEY (order_item_id) REFERENCES order_item (order_item_id),
+  CONSTRAINT fk_kitchen_log_user
+    FOREIGN KEY (performed_by_user_id) REFERENCES app_user (user_id)
+) ENGINE=InnoDB;
+
 
 CREATE OR REPLACE VIEW v_order_total AS
 SELECT
@@ -566,9 +574,6 @@ FROM shift_assignment sa
 JOIN work_shift ws
   ON ws.shift_id = sa.shift_id;
 
--- =========================================================
--- Basic reference data
--- =========================================================
 
 INSERT INTO employee_role (code, name, description) VALUES
   ('ADMIN', 'Administrator', 'Full access to the system'),
@@ -576,9 +581,8 @@ INSERT INTO employee_role (code, name, description) VALUES
   ('CHEF', 'Chef', 'Manages kitchen operations'),
   ('HALL_MANAGER', 'Hall manager', 'Coordinates front-of-house staff'),
   ('ACCOUNTANT', 'Accountant', 'Works with payroll and reports'),
-  ('WAITER', 'Waiter', 'Serves guests'),
-  ('COOK', 'Cook', 'Prepares dishes'),
-  ('CASHIER', 'Cashier', 'Works with payments and closing');
+  ('WAITER', 'Waiter', 'Serves guests and processes payments'),
+  ('COOK', 'Cook', 'Prepares dishes');
 
 INSERT INTO shift_type (code, name, default_start_time, default_end_time, description) VALUES
   ('MORNING', 'Morning shift', '08:00:00', '14:00:00', 'Morning work period'),
@@ -641,9 +645,6 @@ INSERT INTO measurement_unit (code, name, description) VALUES
   ('l', 'Liter', 'Volume in liters'),
   ('pcs', 'Piece', 'Countable unit');
 
--- =========================================================
--- Application seed data
--- =========================================================
 
 INSERT INTO skill (name, description) VALUES
   ('Аналитика', 'Работа с показателями и отчетами'),
@@ -659,7 +660,6 @@ INSERT INTO employee (role_id, last_name, first_name, middle_name, phone, email,
   ((SELECT role_id FROM employee_role WHERE code = 'DIRECTOR'), 'Смирнова', 'Анна', NULL, '+7 900 100-10-01', 'director@gastrosoft.local', CURRENT_DATE(), 1),
   ((SELECT role_id FROM employee_role WHERE code = 'CHEF'), 'Волков', 'Илья', NULL, '+7 900 100-10-02', 'chef@gastrosoft.local', CURRENT_DATE(), 1),
   ((SELECT role_id FROM employee_role WHERE code = 'WAITER'), 'Белова', 'Мария', NULL, '+7 900 100-10-03', 'waiter@gastrosoft.local', CURRENT_DATE(), 1),
-  ((SELECT role_id FROM employee_role WHERE code = 'CASHIER'), 'Корнеев', 'Олег', NULL, '+7 900 100-10-04', 'cashier@gastrosoft.local', CURRENT_DATE(), 1),
   ((SELECT role_id FROM employee_role WHERE code = 'HALL_MANAGER'), 'Орлова', 'Ксения', NULL, '+7 900 100-10-05', 'hall@gastrosoft.local', CURRENT_DATE(), 1),
   ((SELECT role_id FROM employee_role WHERE code = 'COOK'), 'Громов', 'Павел', NULL, '+7 900 100-10-06', 'cook1@gastrosoft.local', CURRENT_DATE(), 1),
   ((SELECT role_id FROM employee_role WHERE code = 'COOK'), 'Котов', 'Даниил', NULL, '+7 900 100-10-07', 'cook2@gastrosoft.local', CURRENT_DATE(), 1),
@@ -669,7 +669,6 @@ INSERT INTO employee_skill (employee_id, skill_id, skill_level) VALUES
   ((SELECT employee_id FROM employee WHERE email = 'director@gastrosoft.local'), (SELECT skill_id FROM skill WHERE name = 'Аналитика'), 5),
   ((SELECT employee_id FROM employee WHERE email = 'chef@gastrosoft.local'), (SELECT skill_id FROM skill WHERE name = 'Горячий цех'), 5),
   ((SELECT employee_id FROM employee WHERE email = 'waiter@gastrosoft.local'), (SELECT skill_id FROM skill WHERE name = 'Гости VIP'), 4),
-  ((SELECT employee_id FROM employee WHERE email = 'cashier@gastrosoft.local'), (SELECT skill_id FROM skill WHERE name = 'Закрытие смены'), 4),
   ((SELECT employee_id FROM employee WHERE email = 'hall@gastrosoft.local'), (SELECT skill_id FROM skill WHERE name = 'Бронирования'), 5),
   ((SELECT employee_id FROM employee WHERE email = 'cook1@gastrosoft.local'), (SELECT skill_id FROM skill WHERE name = 'Холодный цех'), 4),
   ((SELECT employee_id FROM employee WHERE email = 'cook2@gastrosoft.local'), (SELECT skill_id FROM skill WHERE name = 'Гриль'), 4),
@@ -679,8 +678,7 @@ INSERT INTO app_user (employee_id, login, password_hash, is_active) VALUES
   ((SELECT employee_id FROM employee WHERE email = 'director@gastrosoft.local'), 'director', '03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4', 1),
   ((SELECT employee_id FROM employee WHERE email = 'chef@gastrosoft.local'), 'chef', '03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4', 1),
   ((SELECT employee_id FROM employee WHERE email = 'cook1@gastrosoft.local'), 'cook', '03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4', 1),
-  ((SELECT employee_id FROM employee WHERE email = 'waiter@gastrosoft.local'), 'waiter', '03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4', 1),
-  ((SELECT employee_id FROM employee WHERE email = 'cashier@gastrosoft.local'), 'cashier', '03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4', 1);
+  ((SELECT employee_id FROM employee WHERE email = 'waiter@gastrosoft.local'), 'waiter', '03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4', 1);
 
 INSERT INTO restaurant_table (code, seats_count, is_active, note) VALUES
   ('T-01', 2, 1, 'Window table'),
@@ -770,11 +768,21 @@ INSERT INTO shift_assignment (shift_id, employee_id, assignment_role_id, check_i
     NULL
   );
 
-INSERT INTO customer_order (table_id, order_status_id, created_by_user_id, payment_method_id, created_at, closed_at) VALUES
-  ((SELECT table_id FROM restaurant_table WHERE code = 'T-03'), (SELECT order_status_id FROM order_status WHERE code = 'PREPARING'), (SELECT user_id FROM app_user WHERE login = 'waiter'), (SELECT payment_method_id FROM payment_method WHERE code = 'CARD'), DATE_SUB(NOW(), INTERVAL 20 MINUTE), NULL),
-  ((SELECT table_id FROM restaurant_table WHERE code = 'T-02'), (SELECT order_status_id FROM order_status WHERE code = 'CLOSED'), (SELECT user_id FROM app_user WHERE login = 'cashier'), (SELECT payment_method_id FROM payment_method WHERE code = 'CASH'), DATE_SUB(NOW(), INTERVAL 2 HOUR), DATE_SUB(NOW(), INTERVAL 1 HOUR));
+INSERT INTO customer_order (table_id, order_status_id, created_by_user_id, assigned_cook_id, priority, payment_method_id, created_at, started_at, closed_at) VALUES
+  ((SELECT table_id FROM restaurant_table WHERE code = 'T-03'), (SELECT order_status_id FROM order_status WHERE code = 'PREPARING'), (SELECT user_id FROM app_user WHERE login = 'waiter'), (SELECT employee_id FROM employee WHERE email = 'chef@gastrosoft.local'), 'normal', (SELECT payment_method_id FROM payment_method WHERE code = 'CARD'), DATE_SUB(NOW(), INTERVAL 20 MINUTE), DATE_SUB(NOW(), INTERVAL 18 MINUTE), NULL),
+  ((SELECT table_id FROM restaurant_table WHERE code = 'T-02'), (SELECT order_status_id FROM order_status WHERE code = 'CLOSED'), (SELECT user_id FROM app_user WHERE login = 'waiter'), NULL, 'normal', (SELECT payment_method_id FROM payment_method WHERE code = 'CASH'), DATE_SUB(NOW(), INTERVAL 2 HOUR), DATE_SUB(NOW(), INTERVAL 110 MINUTE), DATE_SUB(NOW(), INTERVAL 1 HOUR)),
+  ((SELECT table_id FROM restaurant_table WHERE code = 'T-01'), (SELECT order_status_id FROM order_status WHERE code = 'ACCEPTED'), (SELECT user_id FROM app_user WHERE login = 'waiter'), NULL, 'rush', (SELECT payment_method_id FROM payment_method WHERE code = 'CARD'), DATE_SUB(NOW(), INTERVAL 5 MINUTE), NULL, NULL);
 
-INSERT INTO order_item (order_id, dish_id, order_item_status_id, quantity, unit_price) VALUES
-  ((SELECT order_id FROM customer_order WHERE table_id = (SELECT table_id FROM restaurant_table WHERE code = 'T-03') ORDER BY order_id DESC LIMIT 1), (SELECT dish_id FROM dish WHERE name = 'Том Ям'), (SELECT order_item_status_id FROM order_item_status WHERE code = 'COOKING'), 1, 620.00),
-  ((SELECT order_id FROM customer_order WHERE table_id = (SELECT table_id FROM restaurant_table WHERE code = 'T-03') ORDER BY order_id DESC LIMIT 1), (SELECT dish_id FROM dish WHERE name = 'Лимонад базилик-лайм'), (SELECT order_item_status_id FROM order_item_status WHERE code = 'COOKING'), 1, 260.00),
-  ((SELECT order_id FROM customer_order WHERE table_id = (SELECT table_id FROM restaurant_table WHERE code = 'T-02') ORDER BY order_id DESC LIMIT 1), (SELECT dish_id FROM dish WHERE name = 'Паста Альфредо'), (SELECT order_item_status_id FROM order_item_status WHERE code = 'SERVED'), 2, 590.00);
+INSERT INTO order_item (order_id, dish_id, order_item_status_id, quantity, unit_price, assigned_cook_id, started_at, ready_at, note) VALUES
+  ((SELECT order_id FROM customer_order WHERE table_id = (SELECT table_id FROM restaurant_table WHERE code = 'T-03') ORDER BY order_id DESC LIMIT 1), (SELECT dish_id FROM dish WHERE name = 'Том Ям'), (SELECT order_item_status_id FROM order_item_status WHERE code = 'COOKING'), 1, 620.00, (SELECT employee_id FROM employee WHERE email = 'chef@gastrosoft.local'), DATE_SUB(NOW(), INTERVAL 18 MINUTE), NULL, 'Острее'),
+  ((SELECT order_id FROM customer_order WHERE table_id = (SELECT table_id FROM restaurant_table WHERE code = 'T-03') ORDER BY order_id DESC LIMIT 1), (SELECT dish_id FROM dish WHERE name = 'Лимонад базилик-лайм'), (SELECT order_item_status_id FROM order_item_status WHERE code = 'COOKING'), 1, 260.00, NULL, NULL, NULL, NULL),
+  ((SELECT order_id FROM customer_order WHERE table_id = (SELECT table_id FROM restaurant_table WHERE code = 'T-02') ORDER BY order_id DESC LIMIT 1), (SELECT dish_id FROM dish WHERE name = 'Паста Альфредо'), (SELECT order_item_status_id FROM order_item_status WHERE code = 'SERVED'), 2, 590.00, NULL, DATE_SUB(NOW(), INTERVAL 110 MINUTE), DATE_SUB(NOW(), INTERVAL 95 MINUTE), NULL),
+  ((SELECT order_id FROM customer_order WHERE table_id = (SELECT table_id FROM restaurant_table WHERE code = 'T-01') ORDER BY order_id DESC LIMIT 1), (SELECT dish_id FROM dish WHERE name = 'Бургер GastroSoft'), (SELECT order_item_status_id FROM order_item_status WHERE code = 'QUEUED'), 1, 670.00, NULL, NULL, NULL, 'Без лука'),
+  ((SELECT order_id FROM customer_order WHERE table_id = (SELECT table_id FROM restaurant_table WHERE code = 'T-01') ORDER BY order_id DESC LIMIT 1), (SELECT dish_id FROM dish WHERE name = 'Тар-тар из лосося'), (SELECT order_item_status_id FROM order_item_status WHERE code = 'QUEUED'), 1, 540.00, NULL, NULL, NULL, NULL);
+
+INSERT INTO kitchen_log (order_id, order_item_id, action, performed_by_user_id, note) VALUES
+  ((SELECT order_id FROM customer_order WHERE table_id = (SELECT table_id FROM restaurant_table WHERE code = 'T-03') ORDER BY order_id DESC LIMIT 1), NULL, 'CREATED', (SELECT user_id FROM app_user WHERE login = 'waiter'), 'Заказ создан'),
+  ((SELECT order_id FROM customer_order WHERE table_id = (SELECT table_id FROM restaurant_table WHERE code = 'T-03') ORDER BY order_id DESC LIMIT 1), NULL, 'ACCEPTED', (SELECT user_id FROM app_user WHERE login = 'chef'), 'Принят шеф-поваром'),
+  ((SELECT order_id FROM customer_order WHERE table_id = (SELECT table_id FROM restaurant_table WHERE code = 'T-03') ORDER BY order_id DESC LIMIT 1), (SELECT order_item_id FROM order_item WHERE order_id = (SELECT order_id FROM customer_order WHERE table_id = (SELECT table_id FROM restaurant_table WHERE code = 'T-03') ORDER BY order_id DESC LIMIT 1) AND dish_id = (SELECT dish_id FROM dish WHERE name = 'Том Ям') LIMIT 1), 'STARTED', (SELECT user_id FROM app_user WHERE login = 'chef'), 'Начато приготовление'),
+  ((SELECT order_id FROM customer_order WHERE table_id = (SELECT table_id FROM restaurant_table WHERE code = 'T-01') ORDER BY order_id DESC LIMIT 1), NULL, 'CREATED', (SELECT user_id FROM app_user WHERE login = 'waiter'), 'Срочный заказ'),
+  ((SELECT order_id FROM customer_order WHERE table_id = (SELECT table_id FROM restaurant_table WHERE code = 'T-01') ORDER BY order_id DESC LIMIT 1), NULL, 'PRIORITY_SET', (SELECT user_id FROM app_user WHERE login = 'chef'), 'Приоритет: rush');

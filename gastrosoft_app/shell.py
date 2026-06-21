@@ -19,7 +19,9 @@ from .mysql_store import MySQLBackedStore
 from .pages.auth_page import AuthPage
 from .pages.dashboard_page import DashboardPage
 from .pages.inventory_page import InventoryPage
+from .pages.kitchen_page import KitchenPage
 from .pages.orders_page import OrdersPage
+from .pages.reports_page import ReportsPage
 from .pages.reservations_page import ReservationsPage
 from .pages.staff_page import StaffPage
 from .role_access import allowed_pages_for_role, default_page_for_role, page_meta_for_role
@@ -39,7 +41,9 @@ class GastroSoftWindow(QMainWindow):
             "dashboard": "Главная панель",
             "staff": "Смены и персонал",
             "reservations": "Бронирования",
-            "orders": "Заказы и кухня",
+            "orders": "Заказы",
+            "kitchen": "Кухня",
+            "reports": "Отчёты",
             "inventory": "Склад и отчеты",
         }
 
@@ -48,7 +52,9 @@ class GastroSoftWindow(QMainWindow):
             "dashboard": ("Главный экран", "Ключевые показатели и быстрый доступ к модулям"),
             "staff": ("Смены и персонал", "Планирование графиков и контроль сотрудников"),
             "reservations": ("Бронирования", "Работа со столами и посадкой гостей"),
-            "orders": ("Заказы и кухня", "Оформление заказов и статусы приготовления"),
+            "orders": ("Заказы", "Оформление заказов и контроль статусов"),
+            "kitchen": ("Кухня", "Кухонная очередь, приготовление и контроль блюд"),
+            "reports": ("Отчёты", "Статистика кухни, история заказов и экспорт"),
             "inventory": ("Склад и отчеты", "Остатки, операции и экспорт сводки"),
         }
 
@@ -156,12 +162,14 @@ class GastroSoftWindow(QMainWindow):
         staff_page = StaffPage(self.store)
         reservations_page = ReservationsPage(self.store)
         orders_page = OrdersPage(self.store)
+        kitchen_page = KitchenPage(self.store)
+        reports_page = ReportsPage(self.store, self.project_root)
         inventory_page = InventoryPage(self.store, self.project_root)
 
         auth_page.authenticated.connect(self.on_authenticated)
         dashboard_page.navigate_requested.connect(self.navigate)
 
-        for page in [auth_page, dashboard_page, staff_page, reservations_page, orders_page, inventory_page]:
+        for page in [auth_page, dashboard_page, staff_page, reservations_page, orders_page, kitchen_page, reports_page, inventory_page]:
             if hasattr(page, "status_message"):
                 page.status_message.connect(self.show_status)
 
@@ -171,6 +179,8 @@ class GastroSoftWindow(QMainWindow):
             "staff": staff_page,
             "reservations": reservations_page,
             "orders": orders_page,
+            "kitchen": kitchen_page,
+            "reports": reports_page,
             "inventory": inventory_page,
         }
 

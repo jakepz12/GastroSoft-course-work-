@@ -95,8 +95,14 @@ class DemoStore:
             existing["qty"] += 1
             existing["sum"] = existing["qty"] * existing["price"]
         else:
-            self.order_draft.append({"name": dish_name, "qty": 1, "price": dish["price"], "sum": dish["price"]})
+            self.order_draft.append({"name": dish_name, "qty": 1, "price": dish["price"], "sum": dish["price"], "note": ""})
         return f"В заказ добавлено: {dish_name}."
+
+    def set_draft_item_note(self, index: int, note: str) -> str:
+        if index < 0 or index >= len(self.order_draft):
+            return "Позиция не найдена."
+        self.order_draft[index]["note"] = note
+        return "Примечание сохранено."
 
     def clear_draft(self) -> None:
         self.order_draft.clear()
@@ -115,6 +121,48 @@ class DemoStore:
 
     def complete_order(self, index: int) -> str:
         return "База данных не подключена или заказ не выбран."
+
+    def get_order_items(self, order_id: int) -> list[dict]:
+        return []
+
+    def cancel_order_item(self, order_item_id: int) -> str:
+        return "База данных не подключена."
+
+    def cancel_order(self, order_id: int) -> str:
+        return "База данных не подключена."
+
+    def update_item_status(self, order_item_id: int, status_code: str) -> str:
+        return "База данных не подключена."
+
+    def assign_cook_to_order(self, order_id: int, cook_employee_id: int) -> str:
+        return "База данных не подключена."
+
+    def set_order_priority(self, order_id: int, priority: str) -> str:
+        return "База данных не подключена."
+
+    def start_order(self, order_id: int) -> str:
+        return "База данных не подключена."
+
+    def mark_item_ready(self, order_item_id: int) -> str:
+        return "База данных не подключена."
+
+    def add_order_item_note(self, order_item_id: int, note: str) -> str:
+        return "База данных не подключена."
+
+    def get_kitchen_stats(self) -> dict:
+        return {"avg_prep_time": 0, "in_progress": 0, "completed_today": 0, "rush_active": 0}
+
+    def get_active_orders_for_kitchen(self) -> list[dict]:
+        return self.kitchen_queue
+
+    def get_order_history(self, limit: int = 50) -> list[dict]:
+        return []
+
+    def log_kitchen_action(self, order_id: int, action: str, note: str = "") -> None:
+        pass
+
+    def get_cooks(self) -> list[dict]:
+        return []
 
     def apply_inventory_operation(self, ingredient: str, operation_type: str, amount: float, note: str) -> str:
         return "База данных не подключена. Операция не сохранена."

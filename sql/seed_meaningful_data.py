@@ -180,7 +180,6 @@ def seed_staff(cursor) -> None:
         ("WAITER", "Соколов", "Артем", "Игоревич", "+7 900 200-10-03", "waiter2@gastrosoft.local", "waiter2"),
         ("WAITER", "Морозова", "Дарья", "Андреевна", "+7 900 200-10-04", "waiter3@gastrosoft.local", "waiter3"),
         ("WAITER", "Лебедев", "Никита", "Олегович", "+7 900 200-10-05", "waiter4@gastrosoft.local", "waiter4"),
-        ("CASHIER", "Фролова", "Екатерина", "Ильинична", "+7 900 200-10-06", "cashier2@gastrosoft.local", "cashier2"),
         ("CHEF", "Синицын", "Роман", "Владимирович", "+7 900 200-10-07", "chef2@gastrosoft.local", "chef2"),
         ("COOK", "Захаров", "Михаил", "Павлович", "+7 900 200-10-08", "cook2@gastrosoft.local", "cook2"),
         ("COOK", "Ершова", "Лидия", "Максимовна", "+7 900 200-10-09", "cook3@gastrosoft.local", "cook3"),
@@ -740,7 +739,7 @@ def seed_shifts(cursor) -> None:
 
 def seed_forecasts(cursor) -> None:
     creator_id = id_by(cursor, "app_user", "user_id", "login", "director")
-    role_codes = ["WAITER", "COOK", "CASHIER"]
+    role_codes = ["WAITER", "COOK", "HALL_MANAGER"]
     base = datetime.now().replace(hour=10, minute=0, second=0, microsecond=0)
     for index in range(1, 13):
         note = f"seed:forecast:{index:02d}"
